@@ -16,7 +16,7 @@
 
 ## 𝐃𝐞𝐩𝐥𝐨𝐲 𝐨𝐧 𝐇𝐞𝐫𝐨𝐤𝐮
 
-[![Deploy on Heroku](https://www.herokucdn.com/deploy/button.svg)](https://dashboard.heroku.com/new?template=https://github.com/Tamilupdates/KPSML-X)
+[![Deploy on Heroku](https://www.herokucdn.com/deploy/button.svg)](https://dashboard.heroku.com/new?template=https://github.com/shohan-001/HexUpload)
 
 </div>
 
@@ -99,7 +99,7 @@ nano config.env
   DATABASE_URL = ""
   BASE_URL = ""
   SET_COMMANDS = "True"
-  UPSTREAM_REPO = "https://github.com/Tamilupdates/KPSML-X"
+  UPSTREAM_REPO = "https://github.com/shohan-001/HexUpload"
   UPSTREAM_BRANCH = "hk_kpsmlx"
   ```
 - After Setup Exit from Editor via `CTRL + X`, followed via `y` and `Enter`...
