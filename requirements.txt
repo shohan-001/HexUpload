@@ -41,5 +41,6 @@ tenacity
 tgcrypto
 uvloop
 xattr
+brotli
 yt-dlp[default,curl-cffi]
 pytz
