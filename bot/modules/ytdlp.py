@@ -527,6 +527,8 @@ async def _ytdl(client, message, isLeech=False, sameDir=None, bulk=[]):
     if opt:
         yt_opt = opt.split('|')
         for ytopt in yt_opt:
+            if ':' not in ytopt:
+                continue
             key, value = map(str.strip, ytopt.split(':', 1))
             if key == 'format':
                 if select:
@@ -534,20 +536,40 @@ async def _ytdl(client, message, isLeech=False, sameDir=None, bulk=[]):
                 elif value.startswith('ba/b-'):
                     qual = value
                     continue
+            
+            # Handle special ^ prefix for boolean/numeric values
             if value.startswith('^'):
-                if '.' in value or value == '^inf':
-                    value = float(value.split('^')[1])
+                raw_value = value.split('^')[1]
+                if raw_value.lower() == 'true':
+                    value = True
+                elif raw_value.lower() == 'false':
+                    value = False
+                elif '.' in raw_value or raw_value == 'inf':
+                    try:
+                        value = float(raw_value)
+                    except ValueError:
+                        value = raw_value
                 else:
-                    value = int(value.split('^')[1])
+                    try:
+                        value = int(raw_value)
+                    except ValueError:
+                        value = raw_value
             elif value.lower() == 'true':
                 value = True
             elif value.lower() == 'false':
                 value = False
+            elif value.isdigit():
+                value = int(value)
             elif value.startswith(('{', '[', '(')) and value.endswith(('}', ']', ')')):
-                value = eval(value)
+                try:
+                    value = eval(value)
+                except:
+                    pass  # Keep as string if eval fails
+            
             options[key] = value
 
-        options['playlist_items'] = '0'
+        if 'playlist_items' not in options:
+            options['playlist_items'] = '0'
 
     try:
         result = await sync_to_async(extract_info, link, options)
