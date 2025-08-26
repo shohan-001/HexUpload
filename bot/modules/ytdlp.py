@@ -22,7 +22,69 @@ from bot.helper.listeners.tasks_listener import MirrorLeechListener
 from bot.helper.ext_utils.help_messages import YT_HELP_MESSAGE
 from bot.helper.ext_utils.bulk_links import extract_bulk_links
 
+# Updated extract_info function with better error handling and retry logic
+def extract_info(link, options):
+    # Add improved options for handling signature extraction issues
+    improved_options = {
+        **options,
+        'retries': 3,
+        'fragment_retries': 5,
+        'extractor_retries': 3,
+        'socket_timeout': 30,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['web', 'android', 'ios'],  # Try multiple clients
+                'player_skip': ['webpage', 'configs'],
+                'skip': ['hls', 'dash']  # Skip problematic formats initially
+            }
+        }
+    }
+    
+    with YoutubeDL(improved_options) as ydl:
+        try:
+            result = ydl.extract_info(link, download=False)
+            if result is None:
+                # If first attempt fails, try with alternative extraction method
+                LOGGER.warning(f"First extraction attempt failed for {link}, trying alternative method")
+                fallback_options = {
+                    **improved_options,
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['android', 'web'],
+                            'skip': []  # Don't skip anything in fallback
+                        }
+                    }
+                }
+                with YoutubeDL(fallback_options) as ydl_fallback:
+                    result = ydl_fallback.extract_info(link, download=False)
+                    
+            if result is None:
+                raise ValueError('Info result is None after all attempts')
+            return result
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            if 'nsig extraction failed' in error_msg or 'signature' in error_msg:
+                LOGGER.warning(f"Signature extraction failed for {link}, attempting with basic options")
+                # Try with minimal options as last resort
+                basic_options = {
+                    'quiet': True,
+                    'no_warnings': False,
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['web']
+                        }
+                    }
+                }
+                with YoutubeDL(basic_options) as ydl_basic:
+                    result = ydl_basic.extract_info(link, download=False)
+                    if result is None:
+                        raise ValueError(f'Failed to extract info after all attempts: {str(e)}')
+                    return result
+            else:
+                raise e
 
+# Rest of your existing code remains the same...
 @new_task
 async def select_format(_, query, obj):
     data = query.data.split()
@@ -217,14 +279,6 @@ class YtSelection:
         subbuttons = buttons.build_menu(5)
         msg = f'Choose Audio{i} Qaulity:\n0 is best and 10 is worst\nTimeout: {get_readable_time(self.__timeout-(time()-self.__time))}'
         await editMessage(self.__reply_to, msg, subbuttons)
-
-
-def extract_info(link, options):
-    with YoutubeDL(options) as ydl:
-        result = ydl.extract_info(link, download=False)
-        if result is None:
-            raise ValueError('Info result is None')
-        return result
 
 
 async def _mdisk(link, name):
@@ -499,7 +553,8 @@ async def _ytdl(client, message, isLeech=False, sameDir=None, bulk=[]):
         result = await sync_to_async(extract_info, link, options)
     except Exception as e:
         msg = str(e).replace('<', ' ').replace('>', ' ')
-        await sendMessage(message, f'{tag} {msg}')
+        LOGGER.error(f"yt-dlp extraction failed for {link}: {msg}")
+        await sendMessage(message, f'{tag} ❌ Download failed: {msg}')
         __run_multi()
         await delete_links(message)
         return
