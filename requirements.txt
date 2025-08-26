@@ -6,6 +6,7 @@ apscheduler
 aria2p
 asyncio
 beautifulsoup4
+brotli
 cinemagoer
 cloudscraper
 cryptography
