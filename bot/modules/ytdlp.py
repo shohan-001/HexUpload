@@ -529,44 +529,55 @@ async def _ytdl(client, message, isLeech=False, sameDir=None, bulk=[]):
         for ytopt in yt_opt:
             if ':' not in ytopt:
                 continue
-            key, value = map(str.strip, ytopt.split(':', 1))
-            if key == 'format':
-                if select:
-                    qual = ''
-                elif value.startswith('ba/b-'):
-                    qual = value
+            try:
+                key, value = map(str.strip, ytopt.split(':', 1))
+                if not key or not value:
                     continue
-            
-            # Handle special ^ prefix for boolean/numeric values
-            if value.startswith('^'):
-                raw_value = value.split('^')[1]
-                if raw_value.lower() == 'true':
+                    
+                if key == 'format':
+                    if select:
+                        qual = ''
+                    elif value.startswith('ba/b-'):
+                        qual = value
+                        continue
+                
+                # Handle special ^ prefix for boolean/numeric values
+                if value.startswith('^'):
+                    raw_value = value.split('^')[1]
+                    if raw_value.lower() == 'true':
+                        value = True
+                    elif raw_value.lower() == 'false':
+                        value = False
+                    elif raw_value.lower() == 'inf':
+                        value = float('inf')
+                    elif '.' in raw_value:
+                        try:
+                            value = float(raw_value)
+                        except ValueError:
+                            value = raw_value
+                    else:
+                        try:
+                            value = int(raw_value)
+                        except ValueError:
+                            value = raw_value
+                elif value.lower() == 'true':
                     value = True
-                elif raw_value.lower() == 'false':
+                elif value.lower() == 'false':
                     value = False
-                elif '.' in raw_value or raw_value == 'inf':
+                elif value.isdigit():
+                    value = int(value)
+                elif value.replace('.', '').isdigit():
+                    value = float(value)
+                elif value.startswith(('{', '[', '(')) and value.endswith(('}', ']', ')')):
                     try:
-                        value = float(raw_value)
-                    except ValueError:
-                        value = raw_value
-                else:
-                    try:
-                        value = int(raw_value)
-                    except ValueError:
-                        value = raw_value
-            elif value.lower() == 'true':
-                value = True
-            elif value.lower() == 'false':
-                value = False
-            elif value.isdigit():
-                value = int(value)
-            elif value.startswith(('{', '[', '(')) and value.endswith(('}', ']', ')')):
-                try:
-                    value = eval(value)
-                except:
-                    pass  # Keep as string if eval fails
-            
-            options[key] = value
+                        value = eval(value)
+                    except:
+                        pass  # Keep as string if eval fails
+                
+                options[key] = value
+            except Exception as e:
+                LOGGER.warning(f"Failed to parse yt-dlp option: {ytopt} - {str(e)}")
+                continue
 
         if 'playlist_items' not in options:
             options['playlist_items'] = '0'
