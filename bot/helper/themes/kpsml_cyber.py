@@ -5,7 +5,7 @@ class KPSMLStyle:
     ST_BN1_NAME = '🐨 Contact'
     ST_BN1_URL = 'https://telegram.me/Shohan_max'
     ST_BN2_NAME = '🐙 Github'
-    ST_BN2_URL = 'https://t.me/+vN5m3oLphrBiY2E1'
+    ST_BN2_URL = 'https://github.com/shohan-001'
     ST_MSG = '''<b><i>🚀 Welcome to the HexUpload Bot! 🚀</i></b>
 
 <b>✨ This bot can mirror all your links|files|torrents to:</b>
