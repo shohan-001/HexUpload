@@ -147,14 +147,22 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
         if len(bulk) != 0:
             msg = input_list[:1]
             msg.append(f'{bulk[0]} -i {multi - 1}')
-            nextmsg = await sendMessage(message, " ".join(msg))
+            sent_message = await sendMessage(message, " ".join(msg))
+            if isinstance(sent_message, str):
+                LOGGER.error(f"Failed to send next message for multi-task: {sent_message}")
+                return
+            nextmsg = await client.get_messages(chat_id=message.chat.id, message_ids=sent_message.id)
         else:
             msg = [s.strip() for s in input_list]
             index = msg.index('-i')
             msg[index+1] = f"{multi - 1}"
-            nextmsg = await client.get_messages(chat_id=message.chat.id, message_ids=message.reply_to_message_id + 1)
-            nextmsg = await sendMessage(nextmsg, " ".join(msg))
-        nextmsg = await client.get_messages(chat_id=message.chat.id, message_ids=nextmsg.id)
+            reply_msg_to_send = await client.get_messages(chat_id=message.chat.id, message_ids=message.reply_to_message_id + 1)
+            sent_message = await sendMessage(reply_msg_to_send, " ".join(msg))
+            if isinstance(sent_message, str):
+                LOGGER.error(f"Failed to send next message for multi-task: {sent_message}")
+                return
+            nextmsg = await client.get_messages(chat_id=message.chat.id, message_ids=sent_message.id)
+        
         if folder_name:
             sameDir['tasks'].add(nextmsg.id)
         nextmsg.from_user = message.from_user
