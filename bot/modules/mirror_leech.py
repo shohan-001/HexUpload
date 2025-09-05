@@ -4,7 +4,7 @@ from html import escape
 from traceback import format_exc
 from base64 import b64encode
 from re import match as re_match
-from asyncio import sleep, wrap_future
+from asyncio import sleep, wrap_future, Event
 from aiofiles import open as aiopen
 from aiofiles.os import path as aiopath, makedirs as aiomakedirs
 from cloudscraper import create_scraper
@@ -12,12 +12,13 @@ import os
 import re
 from pathlib import Path
 from shutil import rmtree
+from time import time
 
-from bot import bot, DOWNLOAD_DIR, LOGGER, config_dict, bot_name, categories_dict, user_data
+from bot import bot, DOWNLOAD_DIR, LOGGER, config_dict, bot_name, categories_dict, user_data, download_dict, download_dict_lock, queue_dict_lock, non_queued_dl
 from bot.helper.mirror_utils.download_utils.direct_downloader import add_direct_download
-from bot.helper.ext_utils.bot_utils import is_url, is_magnet, is_mega_link, is_gdrive_link, get_content_type, new_task, sync_to_async, is_rclone_path, is_telegram_link, arg_parser, fetch_user_tds, fetch_user_dumps, get_stats
+from bot.helper.ext_utils.bot_utils import is_url, is_magnet, is_mega_link, is_gdrive_link, get_content_type, new_task, sync_to_async, is_rclone_path, is_telegram_link, arg_parser, fetch_user_tds, fetch_user_dumps, get_stats, get_readable_file_size, get_readable_time, MirrorStatus, EngineStatus
 from bot.helper.ext_utils.exceptions import DirectDownloadLinkException
-from bot.helper.ext_utils.task_manager import task_utils
+from bot.helper.ext_utils.task_manager import task_utils, is_queued
 from bot.helper.mirror_utils.download_utils.aria2_download import add_aria2c_download
 from bot.helper.mirror_utils.download_utils.gd_download import add_gd_download
 from bot.helper.mirror_utils.download_utils.qbit_download import add_qb_torrent
@@ -30,37 +31,110 @@ from bot.helper.mirror_utils.download_utils.telegram_download import TelegramDow
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.button_build import ButtonMaker
-from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, editReplyMarkup, deleteMessage, get_tg_link_content, delete_links, auto_delete_message, open_category_btns, open_dump_btns
+from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, editReplyMarkup, deleteMessage, get_tg_link_content, delete_links, auto_delete_message, open_category_btns, open_dump_btns, update_all_messages
 from bot.helper.listeners.tasks_listener import MirrorLeechListener
 from bot.helper.ext_utils.help_messages import MIRROR_HELP_MESSAGE, CLONE_HELP_MESSAGE, YT_HELP_MESSAGE, help_string
 from bot.helper.ext_utils.bulk_links import extract_bulk_links
 from bot.modules.gen_pyro_sess import get_decrypt_key
+from bot.helper.mirror_utils.status_utils.queue_status import QueueStatus
+
+
+# ===== NEW STATUS TRACKING CLASS FOR COMBINE COMMAND =====
+class CombineDownloadStatus:
+    def __init__(self, name, total_files, listener):
+        self.__name = name
+        self.__total_files = total_files
+        self.__listener = listener
+        self.__current_file_size = 0
+        self.__downloaded_bytes = 0
+        self.__current_file_index = 0
+        self.__processed_bytes = 0
+        self.__speed = 0
+        self.__start_time = time()
+        self.__eta = '-'
+        self.upload_details = listener.upload_details
+        self.message = listener.message
+
+    def update_progress(self, current, total):
+        self.__downloaded_bytes = current
+        self.__current_file_size = total
+        self.__processed_bytes = sum(f.document.file_size for i, f in enumerate(self.__listener.files) if i < self.__current_file_index - 1) + self.__downloaded_bytes
+        self.__speed = self.__processed_bytes / (time() - self.__start_time)
+        try:
+            seconds = (self.size() - self.__processed_bytes) / self.__speed
+            self.__eta = get_readable_time(seconds)
+        except ZeroDivisionError:
+            self.__eta = '-'
+        except:
+            self.__eta = '-'
+        self.message.text = self.processed_bytes() # HACK: Just for update_all_messages
+
+    def name(self):
+        return self.__name
+
+    def progress(self):
+        try:
+            return f"{round(self.__processed_bytes / self.size() * 100, 2)}%"
+        except:
+            return "0%"
+
+    def processed_bytes(self):
+        return get_readable_file_size(self.__processed_bytes)
+
+    def speed(self):
+        return f"{get_readable_file_size(self.__speed)}/s"
+
+    def size(self):
+        return sum(f.document.file_size for f in self.__listener.files)
+
+    def eta(self):
+        return self.__eta
+    
+    def status(self):
+        return MirrorStatus.STATUS_DOWNLOADING
+    
+    def gid(self):
+        return str(self.message.id)
+
+    def download(self):
+        return self
+
+    def eng(self):
+        return EngineStatus().STATUS_TG
 
 # ====== SPLIT FILE COMBINER CLASS ======
 class SplitFileCombiner:
-    def __init__(self, client, message):
+    def __init__(self, client, message, files):
         self.client = client
         self.message = message
+        self.files = files
         self.user_id = message.from_user.id
         self.chat_id = message.chat.id
         self.temp_dir = f"{DOWNLOAD_DIR}{self.message.id}_combine/"
         self.split_files = []
         self.combined_file_path = ""
+        self.status_obj = None
         
-    async def combine_split_files(self, file_messages, output_filename=None, upload_to_drive=True):
+    async def combine_split_files(self, output_filename=None, upload_to_drive=True):
         """Combine multiple split files from Telegram messages"""
         try:
             await aiomakedirs(self.temp_dir, exist_ok=True)
             
-            # Download all split files
+            # Create a status object and add to download_dict to show progress
+            self.status_obj = CombineDownloadStatus(f"Combining {len(self.files)} files", len(self.files), self)
+            async with download_dict_lock:
+                download_dict[self.message.id] = self.status_obj
+            await update_all_messages()
+            
             progress_msg = await sendMessage(self.message, "📥 <b>Downloading split files...</b>")
             
             downloaded_files = []
-            for i, msg in enumerate(file_messages, 1):
+            for i, msg in enumerate(self.files, 1):
+                self.status_obj.__current_file_index = i
                 if msg.document:
-                    file_path = await msg.download(file_name=f"{self.temp_dir}{i:03d}_{msg.document.file_name}")
+                    file_path = await msg.download(file_name=f"{self.temp_dir}{i:03d}_{msg.document.file_name}", progress=self.status_obj.update_progress)
                     downloaded_files.append(file_path)
-                    await editMessage(progress_msg, f"📥 <b>Downloaded:</b> {i}/{len(file_messages)} files")
+                    await editMessage(progress_msg, f"📥 <b>Downloaded:</b> {i}/{len(self.files)} files")
             
             if not downloaded_files:
                 await editMessage(progress_msg, "❌ <b>Error:</b> No files downloaded!")
@@ -89,8 +163,8 @@ class SplitFileCombiner:
             
             file_size = await aiopath.getsize(self.combined_file_path)
             await editMessage(progress_msg, f"✅ <b>Files combined successfully!</b>\n"
-                                         f"📁 <b>Filename:</b> {output_filename}\n"
-                                         f"📏 <b>Size:</b> {self._format_size(file_size)}")
+                                             f"📁 <b>Filename:</b> {output_filename}\n"
+                                             f"📏 <b>Size:</b> {self._format_size(file_size)}")
             
             # Upload to Google Drive
             if upload_to_drive:
@@ -103,6 +177,10 @@ class SplitFileCombiner:
             await sendMessage(self.message, f"❌ <b>Error:</b> {str(e)}")
             return False
         finally:
+            async with download_dict_lock:
+                if self.message.id in download_dict:
+                    del download_dict[self.message.id]
+            await update_all_messages()
             await self._cleanup()
     
     async def _combine_files(self, file_paths, output_path):
@@ -343,9 +421,8 @@ async def start_combining(client, message, session):
             del user_data[user_id]['combine_session']
         
         # Start combining
-        combiner = SplitFileCombiner(client, message)
+        combiner = SplitFileCombiner(client, message, file_messages)
         await combiner.combine_split_files(
-            file_messages,
             custom_filename,
             upload_to_drive=True
         )
@@ -393,7 +470,6 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
                 '-index': '',
                 '-c': '', '-category': '',
                 '-ud': '', '-dump': '',
-                '-h': '', '-headers': '',
                 '-ss': '0', '-screenshots': '',
                 '-t': '', '-thumb': '',
     }
@@ -835,7 +911,18 @@ bot.add_handler(MessageHandler(leech, filters=command(
 bot.add_handler(MessageHandler(qb_leech, filters=command(
     BotCommands.QbLeechCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 
-# The filter is defined correctly, but the handler was missing.
+def is_combine_session(_, __, message):
+    """Filter to check if user has active combine session"""
+    user_id = message.from_user.id
+    if user_id in user_data and 'combine_session' in user_data[user_id]:
+        session = user_data[user_id]['combine_session']
+        return session.get('waiting_for_count', False) or session.get('waiting_for_files', False)
+    return False
+
+from pyrogram.filters import create
+combine_session_filter = create(is_combine_session)
+
+# ====== ADD THIS NEW HANDLER FOR COMBINE COMMAND ======
 bot.add_handler(MessageHandler(
     combine_command, 
     filters=command(BotCommands.CombineCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted
