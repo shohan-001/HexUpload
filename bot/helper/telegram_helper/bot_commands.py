@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from bot import CMD_SUFFIX, config_dict
-
 class _BotCommands:
     def __init__(self):
         self.StartCommand = 'start'
@@ -57,5 +56,8 @@ class _BotCommands:
         self.MyDramaListCommand = f'mdl{CMD_SUFFIX}'
         self.GDCleanCommand = [f'gdclean{CMD_SUFFIX}', f'gc{CMD_SUFFIX}']
         self.BroadcastCommand = [f'broadcast{CMD_SUFFIX}', f'bc{CMD_SUFFIX}']
+        
+        # ====== ADD THIS NEW COMBINE COMMAND ======
+        self.CombineCommand = [f'combine{CMD_SUFFIX}', f'cb{CMD_SUFFIX}']
 
 BotCommands = _BotCommands()
