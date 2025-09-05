@@ -6,7 +6,7 @@ from base64 import b64encode
 from re import match as re_match
 from asyncio import sleep, wrap_future
 from aiofiles import open as aiopen
-from aiofiles.os import path as aiopath
+from aiofiles.os import path as aiopath, makedirs as aiomakedirs
 from cloudscraper import create_scraper
 import os
 import re
@@ -50,7 +50,7 @@ class SplitFileCombiner:
     async def combine_split_files(self, file_messages, output_filename=None, upload_to_drive=True):
         """Combine multiple split files from Telegram messages"""
         try:
-            await aiopath.makedirs(self.temp_dir, exist_ok=True)
+            await aiomakedirs(self.temp_dir, exist_ok=True)
             
             # Download all split files
             progress_msg = await sendMessage(self.message, "📥 <b>Downloading split files...</b>")
@@ -208,7 +208,7 @@ class SplitFileCombiner:
             LOGGER.error(f"Error during cleanup: {e}")
 
 
-# ====== COMBINE COMMAND ======
+# ====== FIXED COMBINE COMMAND (NO GET_CHAT_HISTORY) ======
 @new_task
 async def combine_command(client, message):
     """Command handler for combining split files"""
@@ -356,7 +356,7 @@ async def start_combining(client, message, session):
 
 
 # ====== FILTER FOR COMBINE SESSIONS ======
-def is_combine_session_filter(_, __, message):
+def is_combine_session(_, __, message):
     """Filter to check if user has active combine session"""
     user_id = message.from_user.id
     if user_id in user_data and 'combine_session' in user_data[user_id]:
@@ -365,7 +365,7 @@ def is_combine_session_filter(_, __, message):
     return False
 
 from pyrogram.filters import create
-combine_session_filter = create(is_combine_session_filter)
+combine_session_filter = create(is_combine_session)
 
 
 # ====== YOUR EXISTING _mirror_leech FUNCTION ======
@@ -706,7 +706,7 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
     await delete_links(message)
 
 
-# ====== CALLBACK HANDLER ======
+# ====== MODIFIED CALLBACK HANDLER TO INCLUDE COMBINE FUNCTIONALITY ======
 @new_task
 async def kpsmlxcb(_, query):
     message = query.message
@@ -715,6 +715,10 @@ async def kpsmlxcb(_, query):
     
     if user_id != int(data[1]):
         return await query.answer(text="Not Yours!", show_alert=True)
+    
+    # ====== ADD THIS: Handle combine-related callbacks ======
+    if query.data.startswith('select_file_') or query.data in ['start_combine', 'cancel_combine']:
+        return await combine_callback(_, query)
     
     elif data[2] == "logdisplay":
         await query.answer()
@@ -805,7 +809,6 @@ async def kpsmlxcb(_, query):
                 await deleteMessage(message.reply_to_message.reply_to_message)
 
 
-# ====== COMMAND FUNCTIONS ======
 async def mirror(client, message):
     _mirror_leech(client, message)
 
@@ -822,8 +825,7 @@ async def qb_leech(client, message):
     _mirror_leech(client, message, isQbit=True, isLeech=True)
 
 
-# ====== HANDLER REGISTRATION ======
-# Regular mirror/leech handlers
+# ====== ADD NEW COMBINE COMMAND HANDLER AT THE END ======
 bot.add_handler(MessageHandler(mirror, filters=command(
     BotCommands.MirrorCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 bot.add_handler(MessageHandler(qb_mirror, filters=command(
@@ -833,17 +835,16 @@ bot.add_handler(MessageHandler(leech, filters=command(
 bot.add_handler(MessageHandler(qb_leech, filters=command(
     BotCommands.QbLeechCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 
-# ====== COMBINE COMMAND HANDLER ======
+# The filter is defined correctly, but the handler was missing.
 bot.add_handler(MessageHandler(
     combine_command, 
     filters=command(BotCommands.CombineCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted
 ))
 
-# ====== CRITICAL: COMBINE SESSION HANDLER ======
+# 🔑 ADDED: This is the missing piece! It listens for messages from users who are in an active session.
 bot.add_handler(MessageHandler(
-    handle_combine_session,
+    handle_combine_session, 
     filters=combine_session_filter & CustomFilters.authorized & ~CustomFilters.blacklisted
 ))
 
-# Callback handler (this should be last)
-bot.add_handler(CallbackQueryHandler(kpsmlxcb, filters=regex(r'^kpsml')))
+bot.add_handler(CallbackQueryHandler(kpsmlxcb, filters=regex(r'^kpsmlx')))
