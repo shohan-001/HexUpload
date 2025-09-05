@@ -36,7 +36,7 @@ from bot.helper.ext_utils.help_messages import MIRROR_HELP_MESSAGE, CLONE_HELP_M
 from bot.helper.ext_utils.bulk_links import extract_bulk_links
 from bot.modules.gen_pyro_sess import get_decrypt_key
 
-# ====== ADD THIS NEW CLASS FOR SPLIT FILE COMBINING ======
+# ====== SPLIT FILE COMBINER CLASS ======
 class SplitFileCombiner:
     def __init__(self, client, message):
         self.client = client
@@ -208,71 +208,54 @@ class SplitFileCombiner:
             LOGGER.error(f"Error during cleanup: {e}")
 
 
-# ====== ADD NEW COMBINE COMMAND FUNCTION ======
+# ====== FIXED COMBINE COMMAND (NO GET_CHAT_HISTORY) ======
 @new_task
 async def combine_command(client, message):
     """Command handler for combining split files"""
     try:
-        if not message.reply_to_message:
-            help_msg = (
-                "📋 <b>How to use Split File Combiner:</b>\n\n"
-                "1️⃣ Forward/send all split files to this chat\n"
-                "2️⃣ Reply to the first split file with <code>/combine [optional_filename]</code>\n"
-                "3️⃣ Select all split files when prompted\n\n"
-                "💡 <b>Tips:</b>\n"
-                "• Files will be combined in the order you select them\n"
-                "• Use a descriptive filename to avoid confusion\n"
-                "• Large files will be automatically uploaded to Google Drive\n\n"
-                "📝 <b>Example:</b> <code>/combine my_video.mp4</code>"
-            )
-            await sendMessage(message, help_msg)
-            return
-        
         # Parse command arguments
         args = message.text.split()[1:] if len(message.text.split()) > 1 else []
         custom_filename = " ".join(args) if args else None
         
-        # Get recent messages to find split files
-        recent_messages = []
-        async for msg in client.get_chat_history(message.chat.id, limit=50):
-            if msg.document and msg.date >= message.reply_to_message.date:
-                recent_messages.append(msg)
-            if len(recent_messages) >= 20:
-                break
-        
-        if not recent_messages:
-            await sendMessage(message, "❌ <b>No files found in recent messages!</b>")
+        if not message.reply_to_message:
+            help_msg = (
+                "📋 <b>How to use Split File Combiner:</b>\n\n"
+                "1️⃣ Forward all split files to this chat\n"
+                "2️⃣ Reply to the FIRST split file with <code>/combine [optional_filename]</code>\n"
+                "3️⃣ I'll ask you to forward the remaining files\n"
+                "4️⃣ Send them one by one when prompted\n\n"
+                "💡 <b>Tips:</b>\n"
+                "• Make sure files are in correct order (.001, .002, etc.)\n"
+                "• Use a descriptive filename to avoid confusion\n"
+                "• Files will be automatically uploaded to Google Drive\n\n"
+                "📝 <b>Example:</b> Reply to first split file with:\n"
+                "<code>/combine my_video.mp4</code>"
+            )
+            await sendMessage(message, help_msg)
             return
         
-        # Create file selection interface
-        buttons = ButtonMaker()
-        for i, msg in enumerate(recent_messages[:10]):
-            filename = msg.document.file_name[:30] + "..." if len(msg.document.file_name) > 30 else msg.document.file_name
-            file_size = msg.document.file_size
-            buttons.ibutton(
-                f"📄 {filename} ({file_size // (1024*1024)}MB)",
-                f"select_file_{msg.id}"
-            )
+        # Check if replied message has a document
+        if not message.reply_to_message.document:
+            await sendMessage(message, "❌ Please reply to a file (document) to start combining!")
+            return
         
-        buttons.ibutton("✅ Combine Selected Files", "start_combine")
-        buttons.ibutton("❌ Cancel", "cancel_combine")
-        
-        selection_msg = await sendMessage(
+        # Ask user how many files they want to combine
+        ask_msg = await sendMessage(
             message,
-            "📋 <b>Select split files to combine:</b>\n\n"
-            "🔸 Click on files to select/deselect them\n"
-            "🔸 Selected files will be marked with ✅\n"
-            "🔸 Click 'Combine Selected Files' when ready",
-            buttons.build_menu(1)
+            "🔢 <b>How many split files do you want to combine?</b>\n\n"
+            "Reply with just the number (e.g., 2, 3, 4, etc.)\n"
+            "This includes the file you replied to."
         )
         
-        # Store selection data
+        # Store the initial file and setup
         user_data[message.from_user.id] = user_data.get(message.from_user.id, {})
-        user_data[message.from_user.id]['combine_selection'] = {
-            'messages': {msg.id: msg for msg in recent_messages[:10]},
-            'selected': [],
+        user_data[message.from_user.id]['combine_session'] = {
+            'files': [message.reply_to_message],
             'filename': custom_filename,
-            'selection_msg_id': selection_msg.id
+            'total_files': 0,
+            'waiting_for_count': True,
+            'waiting_for_files': False,
+            'ask_msg_id': ask_msg.id
         }
         
     except Exception as e:
@@ -280,78 +263,114 @@ async def combine_command(client, message):
         await sendMessage(message, f"❌ <b>Error:</b> {str(e)}")
 
 
-# ====== ADD COMBINE CALLBACK HANDLER ======
-async def combine_callback(client, query):
-    """Handle callback queries for file combination"""
+# ====== HANDLE COMBINE SESSION ======
+@new_task
+async def handle_combine_session(client, message):
+    """Handle combine session responses"""
     try:
-        user_id = query.from_user.id
-        data = query.data.split('_', 2)
+        user_id = message.from_user.id
+        if user_id not in user_data or 'combine_session' not in user_data[user_id]:
+            return  # No active session
         
-        if user_id not in user_data or 'combine_selection' not in user_data[user_id]:
-            await query.answer("❌ Selection expired. Please run /combine again.", show_alert=True)
-            return
+        session = user_data[user_id]['combine_session']
         
-        selection_data = user_data[user_id]['combine_selection']
+        # Waiting for file count
+        if session.get('waiting_for_count', False):
+            try:
+                file_count = int(message.text.strip())
+                if file_count < 2:
+                    await sendMessage(message, "❌ You need at least 2 files to combine!")
+                    return
+                
+                session['total_files'] = file_count
+                session['waiting_for_count'] = False
+                session['waiting_for_files'] = True
+                
+                remaining = file_count - 1  # -1 because we already have the first file
+                
+                if remaining > 0:
+                    await sendMessage(
+                        message,
+                        f"📁 <b>Great! Now send the remaining {remaining} files one by one.</b>\n\n"
+                        f"Files received: 1/{file_count}\n"
+                        f"Send the next split file now..."
+                    )
+                else:
+                    # Only 1 file total, start combining
+                    await start_combining(client, message, session)
+                    
+            except ValueError:
+                await sendMessage(message, "❌ Please send a valid number (e.g., 2, 3, 4)")
+                return
         
-        if data[1] == "file":
-            # Toggle file selection
-            msg_id = int(data[2])
-            if msg_id in selection_data['selected']:
-                selection_data['selected'].remove(msg_id)
-            else:
-                selection_data['selected'].append(msg_id)
-            
-            # Update buttons
-            buttons = ButtonMaker()
-            for msg_id, msg in selection_data['messages'].items():
-                filename = msg.document.file_name[:25] + "..." if len(msg.document.file_name) > 25 else msg.document.file_name
-                file_size = msg.document.file_size
-                prefix = "✅" if msg_id in selection_data['selected'] else "📄"
-                buttons.ibutton(
-                    f"{prefix} {filename} ({file_size // (1024*1024)}MB)",
-                    f"select_file_{msg_id}"
-                )
-            
-            buttons.ibutton("🔄 Combine Selected Files", "start_combine")
-            buttons.ibutton("❌ Cancel", "cancel_combine")
-            
-            await query.edit_message_reply_markup(buttons.build_menu(1))
-            await query.answer()
-            
-        elif query.data == "start_combine":
-            if not selection_data['selected']:
-                await query.answer("❌ Please select at least one file!", show_alert=True)
+        # Waiting for additional files
+        elif session.get('waiting_for_files', False):
+            if not message.document:
+                await sendMessage(message, "❌ Please send a file (document), not text!")
                 return
             
-            selected_messages = [selection_data['messages'][msg_id] for msg_id in selection_data['selected']]
-            selected_messages.sort(key=lambda x: selection_data['selected'].index(x.id))
+            session['files'].append(message)
+            current_count = len(session['files'])
+            total_count = session['total_files']
             
-            await query.edit_message_text("🔄 <b>Starting file combination process...</b>")
-            
-            combiner = SplitFileCombiner(client, query.message)
-            await combiner.combine_split_files(
-                selected_messages, 
-                selection_data['filename'], 
-                upload_to_drive=True
-            )
-            
-            if user_id in user_data and 'combine_selection' in user_data[user_id]:
-                del user_data[user_id]['combine_selection']
-            
-        elif query.data == "cancel_combine":
-            await query.edit_message_text("❌ <b>File combination cancelled.</b>")
-            if user_id in user_data and 'combine_selection' in user_data[user_id]:
-                del user_data[user_id]['combine_selection']
-            
+            if current_count < total_count:
+                remaining = total_count - current_count
+                await sendMessage(
+                    message,
+                    f"📁 <b>File received!</b>\n\n"
+                    f"Files received: {current_count}/{total_count}\n"
+                    f"Send the next split file... ({remaining} more needed)"
+                )
+            else:
+                # All files received, start combining
+                await sendMessage(message, "✅ <b>All files received! Starting combination...</b>")
+                await start_combining(client, message, session)
+                
     except Exception as e:
-        LOGGER.error(f"Error in combine callback: {e}")
-        await query.answer(f"❌ Error: {str(e)}", show_alert=True)
+        LOGGER.error(f"Error handling combine session: {e}")
+        await sendMessage(message, f"❌ <b>Error:</b> {str(e)}")
 
 
-# ====== YOUR EXISTING CODE CONTINUES HERE ======
+async def start_combining(client, message, session):
+    """Start the file combination process"""
+    try:
+        file_messages = session['files']
+        custom_filename = session['filename']
+        
+        # Clean up session data
+        user_id = message.from_user.id
+        if user_id in user_data and 'combine_session' in user_data[user_id]:
+            del user_data[user_id]['combine_session']
+        
+        # Start combining
+        combiner = SplitFileCombiner(client, message)
+        await combiner.combine_split_files(
+            file_messages,
+            custom_filename,
+            upload_to_drive=True
+        )
+        
+    except Exception as e:
+        LOGGER.error(f"Error starting combination: {e}")
+        await sendMessage(message, f"❌ <b>Error:</b> {str(e)}")
+
+
+# ====== FILTER FOR COMBINE SESSIONS ======
+def is_combine_session(_, __, message):
+    """Filter to check if user has active combine session"""
+    user_id = message.from_user.id
+    if user_id in user_data and 'combine_session' in user_data[user_id]:
+        session = user_data[user_id]['combine_session']
+        return session.get('waiting_for_count', False) or session.get('waiting_for_files', False)
+    return False
+
+from pyrogram.filters import create
+combine_session_filter = create(is_combine_session)
+
+
+# ====== YOUR EXISTING _mirror_leech FUNCTION ======
 @new_task
 async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=None, bulk=[]):
-    # ... (all your existing _mirror_leech code remains the same) ...
     text = message.text.split('\n')
     input_list = text[0].split(' ')
 
@@ -815,6 +834,17 @@ bot.add_handler(MessageHandler(leech, filters=command(
     BotCommands.LeechCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 bot.add_handler(MessageHandler(qb_leech, filters=command(
     BotCommands.QbLeechCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
+
+def is_combine_session(_, __, message):
+    """Filter to check if user has active combine session"""
+    user_id = message.from_user.id
+    if user_id in user_data and 'combine_session' in user_data[user_id]:
+        session = user_data[user_id]['combine_session']
+        return session.get('waiting_for_count', False) or session.get('waiting_for_files', False)
+    return False
+
+from pyrogram.filters import create
+combine_session_filter = create(is_combine_session)
 
 # ====== ADD THIS NEW HANDLER FOR COMBINE COMMAND ======
 bot.add_handler(MessageHandler(
