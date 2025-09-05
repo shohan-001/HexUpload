@@ -208,7 +208,7 @@ class SplitFileCombiner:
             LOGGER.error(f"Error during cleanup: {e}")
 
 
-# ====== FIXED COMBINE COMMAND (NO GET_CHAT_HISTORY) ======
+# ====== COMBINE COMMAND ======
 @new_task
 async def combine_command(client, message):
     """Command handler for combining split files"""
@@ -356,7 +356,7 @@ async def start_combining(client, message, session):
 
 
 # ====== FILTER FOR COMBINE SESSIONS ======
-def is_combine_session(_, __, message):
+def is_combine_session_filter(_, __, message):
     """Filter to check if user has active combine session"""
     user_id = message.from_user.id
     if user_id in user_data and 'combine_session' in user_data[user_id]:
@@ -365,7 +365,7 @@ def is_combine_session(_, __, message):
     return False
 
 from pyrogram.filters import create
-combine_session_filter = create(is_combine_session)
+combine_session_filter = create(is_combine_session_filter)
 
 
 # ====== YOUR EXISTING _mirror_leech FUNCTION ======
@@ -706,7 +706,7 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
     await delete_links(message)
 
 
-# ====== MODIFIED CALLBACK HANDLER TO INCLUDE COMBINE FUNCTIONALITY ======
+# ====== CALLBACK HANDLER ======
 @new_task
 async def kpsmlxcb(_, query):
     message = query.message
@@ -715,10 +715,6 @@ async def kpsmlxcb(_, query):
     
     if user_id != int(data[1]):
         return await query.answer(text="Not Yours!", show_alert=True)
-    
-    # ====== ADD THIS: Handle combine-related callbacks ======
-    if query.data.startswith('select_file_') or query.data in ['start_combine', 'cancel_combine']:
-        return await combine_callback(_, query)
     
     elif data[2] == "logdisplay":
         await query.answer()
@@ -809,6 +805,7 @@ async def kpsmlxcb(_, query):
                 await deleteMessage(message.reply_to_message.reply_to_message)
 
 
+# ====== COMMAND FUNCTIONS ======
 async def mirror(client, message):
     _mirror_leech(client, message)
 
@@ -825,7 +822,8 @@ async def qb_leech(client, message):
     _mirror_leech(client, message, isQbit=True, isLeech=True)
 
 
-# ====== ADD NEW COMBINE COMMAND HANDLER AT THE END ======
+# ====== HANDLER REGISTRATION ======
+# Regular mirror/leech handlers
 bot.add_handler(MessageHandler(mirror, filters=command(
     BotCommands.MirrorCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 bot.add_handler(MessageHandler(qb_mirror, filters=command(
@@ -835,21 +833,17 @@ bot.add_handler(MessageHandler(leech, filters=command(
 bot.add_handler(MessageHandler(qb_leech, filters=command(
     BotCommands.QbLeechCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 
-def is_combine_session(_, __, message):
-    """Filter to check if user has active combine session"""
-    user_id = message.from_user.id
-    if user_id in user_data and 'combine_session' in user_data[user_id]:
-        session = user_data[user_id]['combine_session']
-        return session.get('waiting_for_count', False) or session.get('waiting_for_files', False)
-    return False
-
-from pyrogram.filters import create
-combine_session_filter = create(is_combine_session)
-
-# ====== ADD THIS NEW HANDLER FOR COMBINE COMMAND ======
+# ====== COMBINE COMMAND HANDLER ======
 bot.add_handler(MessageHandler(
     combine_command, 
     filters=command(BotCommands.CombineCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted
 ))
 
+# ====== CRITICAL: COMBINE SESSION HANDLER ======
+bot.add_handler(MessageHandler(
+    handle_combine_session,
+    filters=combine_session_filter & CustomFilters.authorized & ~CustomFilters.blacklisted
+))
+
+# Callback handler (this should be last)
 bot.add_handler(CallbackQueryHandler(kpsmlxcb, filters=regex(r'^kpsml')))
