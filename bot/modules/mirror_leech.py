@@ -1,5 +1,6 @@
 from pyrogram.handlers import MessageHandler, CallbackQueryHandler
-from pyrogram.filters import command, regex, ChatType
+from pyrogram.filters import command, regex
+from pyrogram.enums import ChatType
 from html import escape
 from traceback import format_exc
 from base64 import b64encode
@@ -9,7 +10,7 @@ from aiofiles import open as aiopen
 from aiofiles.os import path as aiopath, makedirs as aiomakedirs, getsize as aio_getsize
 from cloudscraper import create_scraper
 from shutil import rmtree
-from os import path as ospath, listdir
+from os import path as ospath
 from pathlib import Path
 from time import time
 from urllib.parse import quote as rquote
@@ -30,10 +31,11 @@ from bot.helper.mirror_utils.download_utils.direct_link_generator import direct_
 from bot.helper.mirror_utils.download_utils.telegram_download import TelegramDownloadHelper
 from bot.helper.mirror_utils.status_utils.queue_status import QueueStatus
 from bot.helper.mirror_utils.status_utils.gdrive_status import GdriveStatus
+from bot.helper.mirror_utils.status_utils.telegram_status import TelegramStatus
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.button_build import ButtonMaker
-from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, editReplyMarkup, deleteMessage, get_tg_link_content, delete_links, auto_delete_message, open_category_btns, open_dump_btns, update_all_messages
+from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, editReplyMarkup, deleteMessage, get_tg_link_content, delete_links, auto_delete_message, open_category_btns, open_dump_btns, update_all_messages, delete_all_messages
 from bot.helper.listeners.tasks_listener import MirrorLeechListener
 from bot.helper.ext_utils.help_messages import MIRROR_HELP_MESSAGE, CLONE_HELP_MESSAGE, YT_HELP_MESSAGE, help_string
 from bot.helper.ext_utils.bulk_links import extract_bulk_links
