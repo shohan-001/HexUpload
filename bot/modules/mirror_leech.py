@@ -7,10 +7,12 @@ from base64 import b64encode
 from re import match as re_match, sub as re_sub, split as re_split
 from asyncio import sleep, wrap_future, Event, Lock
 from aiofiles import open as aiopen
-from aiofiles.os import path as aiopath, makedirs as aiomakedirs, getsize as aio_getsize
+from aiofiles.os import path as aiopath, makedirs as aiomakedirs
+from aiofiles.ospath import getsize as aio_getsize
 from cloudscraper import create_scraper
 from shutil import rmtree
-from os import path as ospath
+import os
+import re
 from pathlib import Path
 from time import time
 from urllib.parse import quote as rquote
@@ -31,7 +33,6 @@ from bot.helper.mirror_utils.download_utils.direct_link_generator import direct_
 from bot.helper.mirror_utils.download_utils.telegram_download import TelegramDownloadHelper
 from bot.helper.mirror_utils.status_utils.queue_status import QueueStatus
 from bot.helper.mirror_utils.status_utils.gdrive_status import GdriveStatus
-from bot.helper.mirror_utils.status_utils.telegram_status import TelegramStatus
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.button_build import ButtonMaker
@@ -905,7 +906,18 @@ bot.add_handler(MessageHandler(leech, filters=command(
 bot.add_handler(MessageHandler(qb_leech, filters=command(
     BotCommands.QbLeechCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 
-# The filter is defined correctly, but the handler was missing.
+def is_combine_session(_, __, message):
+    """Filter to check if user has active combine session"""
+    user_id = message.from_user.id
+    if user_id in user_data and 'combine_session' in user_data[user_id]:
+        session = user_data[user_id]['combine_session']
+        return session.get('waiting_for_count', False) or session.get('waiting_for_files', False)
+    return False
+
+from pyrogram.filters import create
+combine_session_filter = create(is_combine_session)
+
+# ====== ADD THIS NEW HANDLER FOR COMBINE COMMAND ======
 bot.add_handler(MessageHandler(
     combine_command, 
     filters=command(BotCommands.CombineCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted
