@@ -58,6 +58,6 @@ class _BotCommands:
         self.BroadcastCommand = [f'broadcast{CMD_SUFFIX}', f'bc{CMD_SUFFIX}']
         
         # ====== ADD THIS NEW COMBINE COMMAND ======
-        self.CombineCommand = [f'combine{CMD_SUFFIX}', f'cb{CMD_SUFFIX}']
+        #self.CombineCommand = [f'combine{CMD_SUFFIX}', f'cb{CMD_SUFFIX}']
 
 BotCommands = _BotCommands()
