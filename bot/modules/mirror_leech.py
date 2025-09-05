@@ -1,23 +1,25 @@
 from pyrogram.handlers import MessageHandler, CallbackQueryHandler
 from pyrogram.filters import command, regex
+from pyrogram.enums import ChatType
 from html import escape
 from traceback import format_exc
 from base64 import b64encode
-from re import match as re_match
-from asyncio import sleep, wrap_future
+from re import match as re_match, sub as re_sub, split as re_split
+from asyncio import sleep, wrap_future, Event, Lock
 from aiofiles import open as aiopen
-from aiofiles.os import path as aiopath
+from aiofiles.os import path as aiopath, makedirs as aiomakedirs, getsize as aio_getsize
 from cloudscraper import create_scraper
-import os
-import re
-from pathlib import Path
 from shutil import rmtree
+from os import path as ospath
+from pathlib import Path
+from time import time
+from urllib.parse import quote as rquote
 
-from bot import bot, DOWNLOAD_DIR, LOGGER, config_dict, bot_name, categories_dict, user_data
+from bot import bot, DOWNLOAD_DIR, LOGGER, config_dict, bot_name, categories_dict, user_data, download_dict, download_dict_lock, non_queued_dl, queue_dict_lock, non_queued_up, Interval
 from bot.helper.mirror_utils.download_utils.direct_downloader import add_direct_download
-from bot.helper.ext_utils.bot_utils import is_url, is_magnet, is_mega_link, is_gdrive_link, get_content_type, new_task, sync_to_async, is_rclone_path, is_telegram_link, arg_parser, fetch_user_tds, fetch_user_dumps, get_stats
+from bot.helper.ext_utils.bot_utils import is_url, is_magnet, is_mega_link, is_gdrive_link, get_content_type, new_task, sync_to_async, is_rclone_path, is_telegram_link, arg_parser, fetch_user_tds, fetch_user_dumps, get_stats, get_readable_file_size, get_readable_time, MirrorStatus, EngineStatus
 from bot.helper.ext_utils.exceptions import DirectDownloadLinkException
-from bot.helper.ext_utils.task_manager import task_utils
+from bot.helper.ext_utils.task_manager import task_utils, is_queued, start_from_queued
 from bot.helper.mirror_utils.download_utils.aria2_download import add_aria2c_download
 from bot.helper.mirror_utils.download_utils.gd_download import add_gd_download
 from bot.helper.mirror_utils.download_utils.qbit_download import add_qb_torrent
@@ -27,98 +29,85 @@ from bot.helper.mirror_utils.rclone_utils.list import RcloneList
 from bot.helper.mirror_utils.upload_utils.gdriveTools import GoogleDriveHelper
 from bot.helper.mirror_utils.download_utils.direct_link_generator import direct_link_generator
 from bot.helper.mirror_utils.download_utils.telegram_download import TelegramDownloadHelper
+from bot.helper.mirror_utils.status_utils.queue_status import QueueStatus
+from bot.helper.mirror_utils.status_utils.gdrive_status import GdriveStatus
+from bot.helper.mirror_utils.status_utils.telegram_status import TelegramStatus
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.button_build import ButtonMaker
-from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, editReplyMarkup, deleteMessage, get_tg_link_content, delete_links, auto_delete_message, open_category_btns, open_dump_btns
+from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, editReplyMarkup, deleteMessage, get_tg_link_content, delete_links, auto_delete_message, open_category_btns, open_dump_btns, update_all_messages, delete_all_messages
 from bot.helper.listeners.tasks_listener import MirrorLeechListener
 from bot.helper.ext_utils.help_messages import MIRROR_HELP_MESSAGE, CLONE_HELP_MESSAGE, YT_HELP_MESSAGE, help_string
 from bot.helper.ext_utils.bulk_links import extract_bulk_links
 from bot.modules.gen_pyro_sess import get_decrypt_key
+from bot.helper.ext_utils.themes_utils import BotTheme
+from bot.helper.ext_utils.status_utils import get_readable_file_size, get_readable_time, MirrorStatus, EngineStatus
+from bot.helper.telegram_helper import message_utils as mutils
 
-# ====== PROPER COMBINE UPLOAD LISTENER ======
-class CombineUploadListener:
-    """Proper listener class with all required methods for upload"""
-    
-    def __init__(self, message, tag, drive_id, index_link, progress_msg, file_path, filename):
-        self.message = message
-        self.tag = tag
-        self.drive_id = drive_id
-        self.index_link = index_link
-        self.progress_msg = progress_msg
-        self.file_path = file_path
-        self.filename = filename
-        
-        # Required properties
-        self.isLeech = False
-        self.compress = False
-        self.extract = False
-        self.isQbit = False
-        self.select = False
-        self.seed = False
-        self.newDir = ""
-        self.dir = f"{DOWNLOAD_DIR}{message.id}_combine/"
-        self.isClone = False
-        self.upPath = "gd"
-        self.user_dict = user_data.get(message.from_user.id, {})
-        self.suproc = None
-        self.uploading = True
-        
-    async def onUploadStart(self):
-        """Called when upload starts"""
-        try:
-            await editMessage(self.progress_msg, "⬆️ <b>Starting upload to Google Drive...</b>")
-        except:
-            pass
-    
-    async def onUploadProgress(self, current, total):
-        """Called during upload progress"""
-        try:
-            percent = (current / total) * 100
-            await editMessage(self.progress_msg, 
-                            f"⬆️ <b>Uploading to Google Drive...</b>\n"
-                            f"📁 <b>File:</b> {self.filename}\n"
-                            f"📊 <b>Progress:</b> {percent:.1f}%\n"
-                            f"📏 <b>Uploaded:</b> {self._format_size(current)} / {self._format_size(total)}")
-        except:
-            pass
-    
-    async def onUploadComplete(self, link, size, files, folders, typ, name, rclone_path=""):
-        """Called when upload completes successfully"""
-        try:
-            msg = f"✅ <b>Upload completed successfully!</b>\n\n"
-            msg += f"📁 <b>Filename:</b> <code>{name}</code>\n"
-            msg += f"📏 <b>Size:</b> {self._format_size(size)}\n"
-            msg += f"🔗 <b>Link:</b> <a href='{link}'>Click Here</a>"
-            
-            if self.index_link:
-                index_url = f"{self.index_link.rstrip('/')}/{name}"
-                msg += f"\n🌐 <b>Index Link:</b> <a href='{index_url}'>Click Here</a>"
-            
-            await editMessage(self.progress_msg, msg)
-        except Exception as e:
-            LOGGER.error(f"Error in onUploadComplete: {e}")
-    
-    async def onUploadError(self, error):
-        """Called when upload fails"""
-        try:
-            await editMessage(self.progress_msg, f"❌ <b>Upload failed:</b> {str(error)}")
-        except:
-            pass
-    
-    def _format_size(self, size_bytes):
-        """Format file size in human readable format"""
-        if size_bytes == 0:
-            return "0B"
-        size_names = ["B", "KB", "MB", "GB", "TB"]
-        i = 0
-        while size_bytes >= 1024 and i < len(size_names) - 1:
-            size_bytes /= 1024.0
-            i += 1
-        return f"{size_bytes:.2f} {size_names[i]}"
+# ====== NEW STATUS TRACKING CLASS FOR COMBINE COMMAND ======
+class CombineDownloadStatus:
+    def __init__(self, name, total_files, listener, file_messages):
+        self.__name = name
+        self.__total_files = total_files
+        self.__listener = listener
+        self.__file_messages = file_messages
+        self.__current_file_size = 0
+        self.__downloaded_bytes = 0
+        self.__current_file_index = 0
+        self.__processed_bytes = 0
+        self.__speed = 0
+        self.__start_time = time()
+        self.__eta = '-'
+        self.message = listener.message
 
+    def update_progress(self, current, total):
+        self.__downloaded_bytes = current
+        self.__current_file_size = total
+        self.__processed_bytes = sum(f.document.file_size for i, f in enumerate(self.__file_messages) if i < self.__current_file_index) + self.__downloaded_bytes
+        self.__speed = self.__processed_bytes / (time() - self.__start_time)
+        try:
+            seconds = (self.size() - self.__processed_bytes) / self.__speed
+            self.__eta = get_readable_time(seconds)
+        except ZeroDivisionError:
+            self.__eta = '-'
+        except:
+            self.__eta = '-'
+        mutils.update_all_messages()
 
-# ====== SPLIT FILE COMBINER CLASS WITH PROGRESS ======
+    def name(self):
+        return self.__name
+
+    def progress(self):
+        try:
+            return f"{round(self.__processed_bytes / self.size() * 100, 2)}%"
+        except:
+            return "0%"
+
+    def processed_bytes(self):
+        return get_readable_file_size(self.__processed_bytes)
+
+    def speed(self):
+        return f"{get_readable_file_size(self.__speed)}/s"
+
+    def size(self):
+        return sum(f.document.file_size for f in self.__file_messages)
+
+    def eta(self):
+        return self.__eta
+    
+    def status(self):
+        return MirrorStatus.STATUS_DOWNLOADING
+    
+    def gid(self):
+        return str(self.message.id)
+
+    def download(self):
+        return self
+
+    def eng(self):
+        return EngineStatus().STATUS_TG
+
+# ====== SPLIT FILE COMBINER CLASS ======
 class SplitFileCombiner:
     def __init__(self, client, message):
         self.client = client
@@ -128,21 +117,28 @@ class SplitFileCombiner:
         self.temp_dir = f"{DOWNLOAD_DIR}{self.message.id}_combine/"
         self.split_files = []
         self.combined_file_path = ""
-        self.progress_msg = None
+        self.status_obj = None
         
     async def combine_split_files(self, file_messages, output_filename=None, upload_to_drive=True):
-        """Combine multiple split files from Telegram messages with live progress"""
+        """Combine multiple split files from Telegram messages"""
         try:
-            await aiopath.makedirs(self.temp_dir, exist_ok=True)
+            await aiomakedirs(self.temp_dir, exist_ok=True)
             
-            # Initialize progress message
-            self.progress_msg = await sendMessage(self.message, "🔄 <b>Starting file combination process...</b>")
+            # Create a status object and add to download_dict to show progress
+            self.status_obj = CombineDownloadStatus(f"Combining {len(file_messages)} files", len(file_messages), self.message, file_messages)
+            async with download_dict_lock:
+                download_dict[self.message.id] = self.status_obj
+
             
-            # Download all split files with progress
-            downloaded_files = await self._download_files_with_progress(file_messages)
+            downloaded_files = []
+            for i, msg in enumerate(file_messages, 1):
+                self.status_obj.__current_file_index = i
+                if msg.document:
+                    file_path = await msg.download(file_name=f"{self.temp_dir}{i:03d}_{msg.document.file_name}", progress=self.status_obj.update_progress)
+                    downloaded_files.append(file_path)
             
             if not downloaded_files:
-                await editMessage(self.progress_msg, "❌ <b>Error:</b> No files downloaded!")
+                await editMessage(self.message, "❌ <b>Error:</b> No files downloaded!")
                 return False
             
             # Sort files naturally
@@ -151,125 +147,58 @@ class SplitFileCombiner:
             # Determine output filename
             if not output_filename:
                 first_file = Path(downloaded_files[0]).name
-                output_filename = re.sub(r'\.\d+$|\.part\d*$|\.z\d+$', '', first_file)
+                output_filename = re_sub(r'\.\d+$|\.part\d*$|\.z\d+$', '', first_file)
                 if not output_filename or output_filename == first_file:
                     output_filename = f"combined_{self.message.id}"
             
             self.combined_file_path = f"{self.temp_dir}{output_filename}"
             
-            # Combine files with progress
-            await self._combine_files_with_progress(downloaded_files, self.combined_file_path)
+            # Combine files
+            await editMessage(self.message, "🔄 <b>Combining files...</b>")
+            await self._combine_files(downloaded_files, self.combined_file_path)
             
             # Check if combined file exists
             if not await aiopath.exists(self.combined_file_path):
-                await editMessage(self.progress_msg, "❌ <b>Error:</b> Failed to create combined file!")
+                await editMessage(self.message, "❌ <b>Error:</b> Failed to create combined file!")
                 return False
             
-            file_size = await aiopath.getsize(self.combined_file_path)
-            await editMessage(self.progress_msg, f"✅ <b>Files combined successfully!</b>\n"
-                                              f"📁 <b>Filename:</b> {output_filename}\n"
-                                              f"📏 <b>Size:</b> {self._format_size(file_size)}")
+            file_size = await aio_getsize(self.combined_file_path)
+            await editMessage(self.message, f"✅ <b>Files combined successfully!</b>\n"
+                                         f"📁 <b>Filename:</b> {output_filename}\n"
+                                         f"📏 <b>Size:</b> {get_readable_file_size(file_size)}")
             
-            # Upload to Google Drive with progress
+            # Upload to Google Drive
             if upload_to_drive:
-                await self._upload_to_drive_with_progress(output_filename)
+                await self._upload_to_drive(output_filename, file_messages)
             
             return True
             
         except Exception as e:
             LOGGER.error(f"Error combining files: {e}")
-            error_msg = f"❌ <b>Error combining files:</b> {str(e)}"
-            if self.progress_msg:
-                await editMessage(self.progress_msg, error_msg)
-            else:
-                await sendMessage(self.message, error_msg)
+            await sendMessage(self.message, f"❌ <b>Error:</b> {str(e)}")
             return False
         finally:
+            async with download_dict_lock:
+                if self.message.id in download_dict:
+                    del download_dict[self.message.id]
+            await update_all_messages()
             await self._cleanup()
     
-    async def _download_files_with_progress(self, file_messages):
-        """Download files with live progress updates"""
-        downloaded_files = []
-        total_files = len(file_messages)
-        
-        for i, msg in enumerate(file_messages, 1):
-            try:
-                if msg.document:
-                    file_name = msg.document.file_name or f"file_{i:03d}"
-                    await editMessage(self.progress_msg, 
-                                    f"⬇️ <b>Downloading file {i}/{total_files}</b>\n"
-                                    f"📁 <b>File:</b> {file_name}\n"
-                                    f"📏 <b>Size:</b> {self._format_size(msg.document.file_size)}")
-                    
-                    file_path = await msg.download(
-                        file_name=f"{self.temp_dir}{i:03d}_{file_name}",
-                        progress=self._download_progress_callback,
-                        progress_args=(i, total_files, file_name)
-                    )
-                    downloaded_files.append(file_path)
-                    
-                    await editMessage(self.progress_msg, 
-                                    f"✅ <b>Downloaded {i}/{total_files} files</b>\n"
-                                    f"📁 <b>Latest:</b> {file_name}")
-                    
-            except Exception as e:
-                LOGGER.error(f"Error downloading file {i}: {e}")
-                await editMessage(self.progress_msg, 
-                                f"❌ <b>Error downloading file {i}:</b> {str(e)}")
-        
-        return downloaded_files
-    
-    async def _download_progress_callback(self, current, total, file_index, total_files, file_name):
-        """Callback for download progress"""
-        try:
-            percent = (current / total) * 100
-            await editMessage(self.progress_msg, 
-                            f"⬇️ <b>Downloading file {file_index}/{total_files}</b>\n"
-                            f"📁 <b>File:</b> {file_name}\n"
-                            f"📊 <b>Progress:</b> {percent:.1f}%\n"
-                            f"📏 <b>Downloaded:</b> {self._format_size(current)} / {self._format_size(total)}")
-        except Exception:
-            pass  # Ignore errors in progress updates
-    
-    async def _combine_files_with_progress(self, file_paths, output_path):
-        """Combine multiple files into one with progress updates"""
-        total_size = sum(await aiopath.getsize(f) for f in file_paths)
-        processed_size = 0
-        
-        await editMessage(self.progress_msg, "🔄 <b>Combining files...</b>\n"
-                                           f"📏 <b>Total size:</b> {self._format_size(total_size)}")
-        
+    async def _combine_files(self, file_paths, output_path):
+        """Combine multiple files into one"""
         async with aiopen(output_path, 'wb') as outfile:
-            for i, file_path in enumerate(file_paths, 1):
-                file_size = await aiopath.getsize(file_path)
-                
+            for file_path in file_paths:
                 async with aiopen(file_path, 'rb') as infile:
                     while True:
                         chunk = await infile.read(1024 * 1024)  # 1MB chunks
                         if not chunk:
                             break
                         await outfile.write(chunk)
-                        processed_size += len(chunk)
-                        
-                        # Update progress every few MB
-                        if processed_size % (5 * 1024 * 1024) == 0:  # Every 5MB
-                            percent = (processed_size / total_size) * 100
-                            await editMessage(self.progress_msg, 
-                                            f"🔄 <b>Combining files... {percent:.1f}%</b>\n"
-                                            f"📊 <b>Processing file:</b> {i}/{len(file_paths)}\n"
-                                            f"📏 <b>Combined:</b> {self._format_size(processed_size)} / {self._format_size(total_size)}")
-                
-                # Update after each file
-                percent = (processed_size / total_size) * 100
-                await editMessage(self.progress_msg, 
-                                f"🔄 <b>Combining files... {percent:.1f}%</b>\n"
-                                f"📊 <b>Completed file:</b> {i}/{len(file_paths)}\n"
-                                f"📏 <b>Combined:</b> {self._format_size(processed_size)} / {self._format_size(total_size)}")
     
-    async def _upload_to_drive_with_progress(self, filename):
-        """Upload combined file to Google Drive with proper listener"""
+    async def _upload_to_drive(self, filename, file_messages):
+        """Upload combined file to Google Drive"""
         try:
-            await editMessage(self.progress_msg, "☁️ <b>Preparing upload to Google Drive...</b>")
+            await editMessage(self.message, "☁️ <b>Uploading to Google Drive...</b>")
             
             user_tds = await fetch_user_tds(self.user_id)
             drive_id = ""
@@ -284,64 +213,61 @@ class SplitFileCombiner:
                 index_link = config_dict.get('INDEX_URL', '')
             
             if not drive_id:
-                await editMessage(self.progress_msg, "❌ <b>Error:</b> No Google Drive ID configured!")
+                await editMessage(self.message, "❌ <b>Error:</b> No Google Drive ID configured!")
                 return
             
             tag = f"@{self.message.from_user.username}" if self.message.from_user.username else self.message.from_user.mention
             
-            # Create proper upload listener
-            listener = CombineUploadListener(
-                self.message, 
-                tag, 
-                drive_id, 
-                index_link, 
-                self.progress_msg,
-                self.combined_file_path,
-                filename
-            )
+            class CombineUploadListener(MirrorLeechListener):
+                def __init__(self, message, tag, drive_id, index_link, up_path):
+                    super().__init__(message, tag=tag, drive_id=drive_id, index_link=index_link, upPath="gd", source_url=message.link)
+                    self.up_path = up_path
+                    self.name = filename
+                    
+                async def onUploadComplete(self, link, size, files, folders, mime_type, name, rclonePath, private):
+                    msg = BotTheme('NAME', Name=escape(name))
+                    msg += BotTheme('SIZE', Size=get_readable_file_size(size))
+                    msg += BotTheme('M_TYPE', Mimetype=mime_type)
+                    msg += BotTheme('ELAPSE', Time=get_readable_time(time() - self.message.date.timestamp()))
+                    
+                    buttons = ButtonMaker()
+                    buttons.ubutton(BotTheme('CLOUD_LINK'), link)
+                    if self.index_link:
+                        url_path = rquote(name)
+                        index_url = f"{self.index_link.rstrip('/')}/{url_path}"
+                        if mime_type == "Folder":
+                            index_url += "/"
+                            buttons.ubutton(BotTheme('INDEX_LINK_F'), index_url)
+                        else:
+                            buttons.ubutton(BotTheme('INDEX_LINK_D'), index_url)
+                    msg += BotTheme('M_CC', Tag=self.tag)
+                    await editMessage(self.message, msg, buttons.build_menu(2), 'IMAGES')
+                    
+                async def onUploadError(self, error):
+                    await editMessage(self.message, f"❌ <b>Upload Error:</b> {error}")
             
-            # Start upload
-            await editMessage(self.progress_msg, "⬆️ <b>Uploading to Google Drive...</b>")
+            upload_listener = CombineUploadListener(self.message, tag, drive_id, index_link, self.combined_file_path)
+
+            size = await aio_getsize(self.combined_file_path)
             
-            gd_helper = GoogleDriveHelper(drive_id, "", listener)
-            result = await sync_to_async(gd_helper.upload, filename, self.combined_file_path, self.combined_file_path)
+            # Start the GDrive upload and show live status
+            gd_helper = GoogleDriveHelper(upload_listener)
             
-            if result:
-                link = f"https://drive.google.com/file/d/{result}/view"
-                if index_link:
-                    index_url = f"{index_link.rstrip('/')}/{filename}"
-                else:
-                    index_url = link
-                
-                msg = f"✅ <b>File uploaded successfully to Google Drive!</b>\n\n"
-                msg += f"📁 <b>Filename:</b> <code>{filename}</code>\n"
-                msg += f"📏 <b>Size:</b> {self._format_size(await aiopath.getsize(self.combined_file_path))}\n"
-                msg += f"🔗 <b>Drive Link:</b> <a href='{link}'>Click Here</a>\n"
-                if index_url != link:
-                    msg += f"🌐 <b>Index Link:</b> <a href='{index_url}'>Click Here</a>"
-                
-                await editMessage(self.progress_msg, msg)
-            else:
-                await editMessage(self.progress_msg, "❌ <b>Error:</b> Failed to upload to Google Drive!")
-                
+            async with download_dict_lock:
+                download_dict[upload_listener.uid] = GdriveStatus(gd_helper, size, self.message, upload_listener.uid, 'up', upload_listener.upload_details)
+            async with queue_dict_lock:
+                non_queued_up.add(upload_listener.uid)
+            
+            await update_all_messages()
+            await sync_to_async(gd_helper.upload, filename, self.combined_file_path, drive_id)
+
         except Exception as e:
             LOGGER.error(f"Error uploading to drive: {e}")
-            await editMessage(self.progress_msg, f"❌ <b>Upload Error:</b> {str(e)}")
+            await editMessage(self.message, f"❌ <b>Upload Error:</b> {str(e)}")
     
     def _natural_sort_key(self, text):
         """Natural sorting key for filenames with numbers"""
-        return [int(x) if x.isdigit() else x.lower() for x in re.split('([0-9]+)', str(text))]
-    
-    def _format_size(self, size_bytes):
-        """Format file size in human readable format"""
-        if size_bytes == 0:
-            return "0B"
-        size_names = ["B", "KB", "MB", "GB", "TB"]
-        i = 0
-        while size_bytes >= 1024 and i < len(size_names) - 1:
-            size_bytes /= 1024.0
-            i += 1
-        return f"{size_bytes:.2f} {size_names[i]}"
+        return [int(x) if x.isdigit() else x.lower() for x in re_split('([0-9]+)', str(text))]
     
     async def _cleanup(self):
         """Clean up temporary files"""
@@ -352,7 +278,7 @@ class SplitFileCombiner:
             LOGGER.error(f"Error during cleanup: {e}")
 
 
-# ====== COMBINE COMMAND ======
+# ====== FIXED COMBINE COMMAND (NO GET_CHAT_HISTORY) ======
 @new_task
 async def combine_command(client, message):
     """Command handler for combining split files"""
@@ -386,7 +312,7 @@ async def combine_command(client, message):
         # Ask user how many files they want to combine
         ask_msg = await sendMessage(
             message,
-            "📢 <b>How many split files do you want to combine?</b>\n\n"
+            "🔢 <b>How many split files do you want to combine?</b>\n\n"
             "Reply with just the number (e.g., 2, 3, 4, etc.)\n"
             "This includes the file you replied to."
         )
@@ -435,7 +361,7 @@ async def handle_combine_session(client, message):
                 if remaining > 0:
                     await sendMessage(
                         message,
-                        f"📥 <b>Great! Now send the remaining {remaining} files one by one.</b>\n\n"
+                        f"📁 <b>Great! Now send the remaining {remaining} files one by one.</b>\n\n"
                         f"Files received: 1/{file_count}\n"
                         f"Send the next split file now..."
                     )
@@ -461,7 +387,7 @@ async def handle_combine_session(client, message):
                 remaining = total_count - current_count
                 await sendMessage(
                     message,
-                    f"📥 <b>File received!</b>\n\n"
+                    f"📁 <b>File received!</b>\n\n"
                     f"Files received: {current_count}/{total_count}\n"
                     f"Send the next split file... ({remaining} more needed)"
                 )
@@ -500,7 +426,7 @@ async def start_combining(client, message, session):
 
 
 # ====== FILTER FOR COMBINE SESSIONS ======
-def is_combine_session_filter(_, __, message):
+def is_combine_session(_, __, message):
     """Filter to check if user has active combine session"""
     user_id = message.from_user.id
     if user_id in user_data and 'combine_session' in user_data[user_id]:
@@ -509,7 +435,7 @@ def is_combine_session_filter(_, __, message):
     return False
 
 from pyrogram.filters import create
-combine_session_filter = create(is_combine_session_filter)
+combine_session_filter = create(is_combine_session)
 
 
 # ====== YOUR EXISTING _mirror_leech FUNCTION ======
@@ -690,7 +616,7 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
 
     if not is_url(link) and not is_magnet(link) and not await aiopath.exists(link) and not is_rclone_path(link) and file_ is None:
         btn = ButtonMaker()
-        btn.ibutton('CÊŸÉªá´„á´‹ Há´‡Ê€á´‡ Tá´ Rá´‡á´€á´… Má´Ê€á´‡ ...', f'kpsmlx {message.from_user.id} help MIRROR')
+        btn.ibutton('Cʟɪᴄᴋ Hᴇʀᴇ Tᴏ Rᴇᴀᴅ Mᴏʀᴇ ...', f'kpsmlx {message.from_user.id} help MIRROR')
         await sendMessage(message, MIRROR_HELP_MESSAGE[0], btn.build_menu(1))
         await delete_links(message)
         return
@@ -850,7 +776,7 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
     await delete_links(message)
 
 
-# ====== CALLBACK HANDLER ======
+# ====== MODIFIED CALLBACK HANDLER TO INCLUDE COMBINE FUNCTIONALITY ======
 @new_task
 async def kpsmlxcb(_, query):
     message = query.message
@@ -859,6 +785,10 @@ async def kpsmlxcb(_, query):
     
     if user_id != int(data[1]):
         return await query.answer(text="Not Yours!", show_alert=True)
+    
+    # ====== ADD THIS: Handle combine-related callbacks ======
+    if query.data.startswith('select_file_') or query.data in ['start_combine', 'cancel_combine']:
+        return await combine_callback(_, query)
     
     elif data[2] == "logdisplay":
         await query.answer()
@@ -879,7 +809,7 @@ async def kpsmlxcb(_, query):
             startLine = f"<b>Showing Last {ind} Lines from log.txt:</b> \n\n----------<b>START LOG</b>----------\n\n"
             endLine = "\n----------<b>END LOG</b>----------"
             btn = ButtonMaker()
-            btn.ibutton('CÊŸá´sá´‡', f'kpsmlx {user_id} close')
+            btn.ibutton('Cʟᴏsᴇ', f'kpsmlx {user_id} close')
             await sendMessage(message, startLine + escape(Loglines) + endLine, btn.build_menu(1))
             await editReplyMarkup(message, None)
         except Exception as err:
@@ -892,7 +822,7 @@ async def kpsmlxcb(_, query):
         resp = cget('POST', 'https://spaceb.in/api/v1/documents', data={'content': logFile, 'extension': 'None'}).json()
         if resp['status'] == 201:
             btn = ButtonMaker()
-            btn.ubutton('🔨 Web Paste (SB)', f"https://spaceb.in/{resp['payload']['id']}")
+            btn.ubutton('📨 Web Paste (SB)', f"https://spaceb.in/{resp['payload']['id']}")
             await editReplyMarkup(message, btn.build_menu(1))
         else:
             LOGGER.error(f"Web Paste Failed : {str(err)}")
@@ -901,23 +831,23 @@ async def kpsmlxcb(_, query):
     elif data[2] == "help":
         await query.answer()
         btn = ButtonMaker()
-        btn.ibutton('CÊŸá´sá´‡', f'kpsmlx {user_id} close')
+        btn.ibutton('Cʟᴏsᴇ', f'kpsmlx {user_id} close')
         if data[3] == "CLONE":
             await editMessage(message, CLONE_HELP_MESSAGE[1], btn.build_menu(1))
         elif data[3] == "MIRROR":
             if len(data) == 4:
                 msg = MIRROR_HELP_MESSAGE[1][:4000]
-                btn.ibutton('Ná´‡xá´› Pá´€É¢á´‡', f'kpsmlx {user_id} help MIRROR readmore')
+                btn.ibutton('Nᴇxᴛ Pᴀɢᴇ', f'kpsmlx {user_id} help MIRROR readmore')
             else:
                 msg = MIRROR_HELP_MESSAGE[1][4000:]
-                btn.ibutton('PÊ€á´‡ Pá´€É¢á´‡', f'kpsmlx {user_id} help MIRROR')
+                btn.ibutton('Pʀᴇ Pᴀɢᴇ', f'kpsmlx {user_id} help MIRROR')
             await editMessage(message, msg, btn.build_menu(2))
         if data[3] == "YT":
             await editMessage(message, YT_HELP_MESSAGE[1], btn.build_menu(1))
     elif data[2] == "guide":
         btn = ButtonMaker()
-        btn.ibutton('Bá´€á´„á´‹', f'kpsmlx {user_id} guide home')
-        btn.ibutton('CÊŸá´sá´‡', f'kpsmlx {user_id} close')
+        btn.ibutton('Bᴀᴄᴋ', f'kpsmlx {user_id} guide home')
+        btn.ibutton('Cʟᴏsᴇ', f'kpsmlx {user_id} close')
         if data[3] == "basic":
             await editMessage(message, help_string[0], btn.build_menu(2))
         elif data[3] == "users":
@@ -935,7 +865,7 @@ async def kpsmlxcb(_, query):
             buttons.ibutton('Mics', f'kpsmlx {user_id} guide miscs')
             buttons.ibutton('Owner & Sudos', f'kpsmlx {user_id} guide admin')
             buttons.ibutton('Close', f'kpsmlx {user_id} close')
-            await editMessage(message, "〈 <b><i>Help Guide Menu!</i></b>\n\n<b>NOTE: <i>Click on any CMD to see more minor detalis.</i></b>", buttons.build_menu(2))
+            await editMessage(message, "㊂ <b><i>Help Guide Menu!</i></b>\n\n<b>NOTE: <i>Click on any CMD to see more minor detalis.</i></b>", buttons.build_menu(2))
         await query.answer()
     elif data[2] == "stats":
         msg, btn = await get_stats(query, data[3])
@@ -949,7 +879,6 @@ async def kpsmlxcb(_, query):
                 await deleteMessage(message.reply_to_message.reply_to_message)
 
 
-# ====== COMMAND FUNCTIONS ======
 async def mirror(client, message):
     _mirror_leech(client, message)
 
@@ -966,8 +895,7 @@ async def qb_leech(client, message):
     _mirror_leech(client, message, isQbit=True, isLeech=True)
 
 
-# ====== HANDLER REGISTRATION ======
-# Regular mirror/leech handlers
+# ====== ADD NEW HANDLERS FOR COMBINE COMMAND AND CALLBACKS ======
 bot.add_handler(MessageHandler(mirror, filters=command(
     BotCommands.MirrorCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 bot.add_handler(MessageHandler(qb_mirror, filters=command(
@@ -977,17 +905,15 @@ bot.add_handler(MessageHandler(leech, filters=command(
 bot.add_handler(MessageHandler(qb_leech, filters=command(
     BotCommands.QbLeechCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 
-# ====== COMBINE COMMAND HANDLER ======
+# The filter is defined correctly, but the handler was missing.
 bot.add_handler(MessageHandler(
     combine_command, 
     filters=command(BotCommands.CombineCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted
 ))
 
-# ====== CRITICAL: COMBINE SESSION HANDLER ======
 bot.add_handler(MessageHandler(
-    handle_combine_session,
+    handle_combine_session, 
     filters=combine_session_filter & CustomFilters.authorized & ~CustomFilters.blacklisted
 ))
 
-# Callback handler (this should be last)
-bot.add_handler(CallbackQueryHandler(kpsmlxcb, filters=regex(r'^kpsml')))
+bot.add_handler(CallbackQueryHandler(kpsmlxcb, filters=regex(r'^kpsmlx')))
