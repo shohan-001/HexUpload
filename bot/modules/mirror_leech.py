@@ -89,8 +89,8 @@ class SplitFileCombiner:
             
             file_size = await aiopath.getsize(self.combined_file_path)
             await editMessage(progress_msg, f"✅ <b>Files combined successfully!</b>\n"
-                                         f"📁 <b>Filename:</b> {output_filename}\n"
-                                         f"📏 <b>Size:</b> {self._format_size(file_size)}")
+                                             f"📁 <b>Filename:</b> {output_filename}\n"
+                                             f"📏 <b>Size:</b> {self._format_size(file_size)}")
             
             # Upload to Google Drive
             if upload_to_drive:
@@ -157,29 +157,29 @@ class SplitFileCombiner:
                     self.isClone = False
                     self.upPath = "gd"
                     self.user_dict = user_data.get(message.from_user.id, {})
+                
+                async def onUploadComplete(self, link, size, files, folders, mime_type, name):
+                    if not link:
+                        return await self.onUploadError("Failed to get shareable link from Google Drive.")
+                    
+                    msg = f"✅ <b>File uploaded successfully to Google Drive!</b>\n\n"
+                    msg += f"📁 <b>Filename:</b> <code>{name}</code>\n"
+                    msg += f"📏 <b>Size:</b> {self._format_size(size)}\n"
+                    msg += f"🔗 <b>Drive Link:</b> <a href='{link}'>Click Here</a>\n"
+                    if self.index_link:
+                        url_path = rutils.quote(f'{name}')
+                        index_url = f'{self.index_link}/{url_path}'
+                        msg += f"🌐 <b>Index Link:</b> <a href='{index_url}'>Click Here</a>"
+                    
+                    await editMessage(self.message, msg)
+                
+                async def onUploadError(self, error):
+                    await editMessage(self.message, f"❌ <b>Upload Error:</b> {error}")
             
             listener = CombineUploadListener(self.message, tag, drive_id, index_link)
             gd_helper = GoogleDriveHelper(drive_id, "", listener)
-            result = await sync_to_async(gd_helper.upload, filename, self.combined_file_path, self.combined_file_path)
+            await sync_to_async(gd_helper.upload, filename, await aiopath.getsize(self.combined_file_path), self.combined_file_path)
             
-            if result:
-                link = f"https://drive.google.com/file/d/{result}/view"
-                if index_link:
-                    index_url = f"{index_link.rstrip('/')}/{filename}"
-                else:
-                    index_url = link
-                
-                msg = f"✅ <b>File uploaded successfully to Google Drive!</b>\n\n"
-                msg += f"📁 <b>Filename:</b> <code>{filename}</code>\n"
-                msg += f"📏 <b>Size:</b> {self._format_size(await aiopath.getsize(self.combined_file_path))}\n"
-                msg += f"🔗 <b>Drive Link:</b> <a href='{link}'>Click Here</a>\n"
-                if index_url != link:
-                    msg += f"🌐 <b>Index Link:</b> <a href='{index_url}'>Click Here</a>"
-                
-                await editMessage(progress_msg, msg)
-            else:
-                await editMessage(progress_msg, "❌ <b>Error:</b> Failed to upload to Google Drive!")
-                
         except Exception as e:
             LOGGER.error(f"Error uploading to drive: {e}")
             await editMessage(progress_msg, f"❌ <b>Upload Error:</b> {str(e)}")
@@ -835,13 +835,23 @@ bot.add_handler(MessageHandler(leech, filters=command(
 bot.add_handler(MessageHandler(qb_leech, filters=command(
     BotCommands.QbLeechCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 
-# The filter is defined correctly, but the handler was missing.
+def is_combine_session(_, __, message):
+    """Filter to check if user has active combine session"""
+    user_id = message.from_user.id
+    if user_id in user_data and 'combine_session' in user_data[user_id]:
+        session = user_data[user_id]['combine_session']
+        return session.get('waiting_for_count', False) or session.get('waiting_for_files', False)
+    return False
+
+from pyrogram.filters import create
+combine_session_filter = create(is_combine_session)
+
+# ====== ADD THIS NEW HANDLER FOR COMBINE COMMAND ======
 bot.add_handler(MessageHandler(
     combine_command, 
     filters=command(BotCommands.CombineCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted
 ))
 
-# 🔑 ADDED: This is the missing piece! It listens for messages from users who are in an active session.
 bot.add_handler(MessageHandler(
     handle_combine_session, 
     filters=combine_session_filter & CustomFilters.authorized & ~CustomFilters.blacklisted
