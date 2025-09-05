@@ -41,7 +41,7 @@ from bot.helper.listeners.tasks_listener import MirrorLeechListener
 from bot.helper.ext_utils.help_messages import MIRROR_HELP_MESSAGE, CLONE_HELP_MESSAGE, YT_HELP_MESSAGE, help_string
 from bot.helper.ext_utils.bulk_links import extract_bulk_links
 from bot.modules.gen_pyro_sess import get_decrypt_key
-from bot.helper.ext_utils.themes_utils import BotTheme
+from bot.helper.themes import BotTheme
 from bot.helper.ext_utils.status_utils import get_readable_file_size, get_readable_time, MirrorStatus, EngineStatus
 from bot.helper.telegram_helper import message_utils as mutils
 
