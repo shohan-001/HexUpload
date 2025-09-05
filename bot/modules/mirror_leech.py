@@ -1,27 +1,19 @@
 from pyrogram.handlers import MessageHandler, CallbackQueryHandler
 from pyrogram.filters import command, regex
-from pyrogram.enums import ChatType
 from html import escape
 from traceback import format_exc
 from base64 import b64encode
-from re import match as re_match, sub as re_sub, split as re_split
-from asyncio import sleep, wrap_future, Event, Lock
+from re import match as re_match
+from asyncio import sleep, wrap_future
 from aiofiles import open as aiopen
-from aiofiles.os import path as aiopath, makedirs as aiomakedirs
-from aiofiles.ospath import getsize as aio_getsize
+from aiofiles.os import path as aiopath
 from cloudscraper import create_scraper
-from shutil import rmtree
-import os
-import re
-from pathlib import Path
-from time import time
-from urllib.parse import quote as rquote
 
-from bot import bot, DOWNLOAD_DIR, LOGGER, config_dict, bot_name, categories_dict, user_data, download_dict, download_dict_lock, non_queued_dl, queue_dict_lock, non_queued_up, Interval
+from bot import bot, DOWNLOAD_DIR, LOGGER, config_dict, bot_name, categories_dict, user_data
 from bot.helper.mirror_utils.download_utils.direct_downloader import add_direct_download
-from bot.helper.ext_utils.bot_utils import is_url, is_magnet, is_mega_link, is_gdrive_link, get_content_type, new_task, sync_to_async, is_rclone_path, is_telegram_link, arg_parser, fetch_user_tds, fetch_user_dumps, get_stats, get_readable_file_size, get_readable_time, MirrorStatus, EngineStatus
+from bot.helper.ext_utils.bot_utils import is_url, is_magnet, is_mega_link, is_gdrive_link, get_content_type, new_task, sync_to_async, is_rclone_path, is_telegram_link, arg_parser, fetch_user_tds, fetch_user_dumps, get_stats
 from bot.helper.ext_utils.exceptions import DirectDownloadLinkException
-from bot.helper.ext_utils.task_manager import task_utils, is_queued, start_from_queued
+from bot.helper.ext_utils.task_manager import task_utils
 from bot.helper.mirror_utils.download_utils.aria2_download import add_aria2c_download
 from bot.helper.mirror_utils.download_utils.gd_download import add_gd_download
 from bot.helper.mirror_utils.download_utils.qbit_download import add_qb_torrent
@@ -31,415 +23,15 @@ from bot.helper.mirror_utils.rclone_utils.list import RcloneList
 from bot.helper.mirror_utils.upload_utils.gdriveTools import GoogleDriveHelper
 from bot.helper.mirror_utils.download_utils.direct_link_generator import direct_link_generator
 from bot.helper.mirror_utils.download_utils.telegram_download import TelegramDownloadHelper
-from bot.helper.mirror_utils.status_utils.queue_status import QueueStatus
-from bot.helper.mirror_utils.status_utils.gdrive_status import GdriveStatus
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.button_build import ButtonMaker
-from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, editReplyMarkup, deleteMessage, get_tg_link_content, delete_links, auto_delete_message, open_category_btns, open_dump_btns, update_all_messages, delete_all_messages
+from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, editReplyMarkup, deleteMessage, get_tg_link_content, delete_links, auto_delete_message, open_category_btns, open_dump_btns
 from bot.helper.listeners.tasks_listener import MirrorLeechListener
 from bot.helper.ext_utils.help_messages import MIRROR_HELP_MESSAGE, CLONE_HELP_MESSAGE, YT_HELP_MESSAGE, help_string
 from bot.helper.ext_utils.bulk_links import extract_bulk_links
 from bot.modules.gen_pyro_sess import get_decrypt_key
-from bot.helper.themes import BotTheme
-from bot.helper.ext_utils.status_utils import get_readable_file_size, get_readable_time, MirrorStatus, EngineStatus
-from bot.helper.telegram_helper import message_utils as mutils
 
-# ====== NEW STATUS TRACKING CLASS FOR COMBINE COMMAND ======
-class CombineDownloadStatus:
-    def __init__(self, name, total_files, listener, file_messages):
-        self.__name = name
-        self.__total_files = total_files
-        self.__listener = listener
-        self.__file_messages = file_messages
-        self.__current_file_size = 0
-        self.__downloaded_bytes = 0
-        self.__current_file_index = 0
-        self.__processed_bytes = 0
-        self.__speed = 0
-        self.__start_time = time()
-        self.__eta = '-'
-        self.message = listener.message
-
-    def update_progress(self, current, total):
-        self.__downloaded_bytes = current
-        self.__current_file_size = total
-        self.__processed_bytes = sum(f.document.file_size for i, f in enumerate(self.__file_messages) if i < self.__current_file_index) + self.__downloaded_bytes
-        self.__speed = self.__processed_bytes / (time() - self.__start_time)
-        try:
-            seconds = (self.size() - self.__processed_bytes) / self.__speed
-            self.__eta = get_readable_time(seconds)
-        except ZeroDivisionError:
-            self.__eta = '-'
-        except:
-            self.__eta = '-'
-        mutils.update_all_messages()
-
-    def name(self):
-        return self.__name
-
-    def progress(self):
-        try:
-            return f"{round(self.__processed_bytes / self.size() * 100, 2)}%"
-        except:
-            return "0%"
-
-    def processed_bytes(self):
-        return get_readable_file_size(self.__processed_bytes)
-
-    def speed(self):
-        return f"{get_readable_file_size(self.__speed)}/s"
-
-    def size(self):
-        return sum(f.document.file_size for f in self.__file_messages)
-
-    def eta(self):
-        return self.__eta
-    
-    def status(self):
-        return MirrorStatus.STATUS_DOWNLOADING
-    
-    def gid(self):
-        return str(self.message.id)
-
-    def download(self):
-        return self
-
-    def eng(self):
-        return EngineStatus().STATUS_TG
-
-# ====== SPLIT FILE COMBINER CLASS ======
-class SplitFileCombiner:
-    def __init__(self, client, message):
-        self.client = client
-        self.message = message
-        self.user_id = message.from_user.id
-        self.chat_id = message.chat.id
-        self.temp_dir = f"{DOWNLOAD_DIR}{self.message.id}_combine/"
-        self.split_files = []
-        self.combined_file_path = ""
-        self.status_obj = None
-        
-    async def combine_split_files(self, file_messages, output_filename=None, upload_to_drive=True):
-        """Combine multiple split files from Telegram messages"""
-        try:
-            await aiomakedirs(self.temp_dir, exist_ok=True)
-            
-            # Create a status object and add to download_dict to show progress
-            self.status_obj = CombineDownloadStatus(f"Combining {len(file_messages)} files", len(file_messages), self.message, file_messages)
-            async with download_dict_lock:
-                download_dict[self.message.id] = self.status_obj
-
-            
-            downloaded_files = []
-            for i, msg in enumerate(file_messages, 1):
-                self.status_obj.__current_file_index = i
-                if msg.document:
-                    file_path = await msg.download(file_name=f"{self.temp_dir}{i:03d}_{msg.document.file_name}", progress=self.status_obj.update_progress)
-                    downloaded_files.append(file_path)
-            
-            if not downloaded_files:
-                await editMessage(self.message, "❌ <b>Error:</b> No files downloaded!")
-                return False
-            
-            # Sort files naturally
-            downloaded_files.sort(key=self._natural_sort_key)
-            
-            # Determine output filename
-            if not output_filename:
-                first_file = Path(downloaded_files[0]).name
-                output_filename = re_sub(r'\.\d+$|\.part\d*$|\.z\d+$', '', first_file)
-                if not output_filename or output_filename == first_file:
-                    output_filename = f"combined_{self.message.id}"
-            
-            self.combined_file_path = f"{self.temp_dir}{output_filename}"
-            
-            # Combine files
-            await editMessage(self.message, "🔄 <b>Combining files...</b>")
-            await self._combine_files(downloaded_files, self.combined_file_path)
-            
-            # Check if combined file exists
-            if not await aiopath.exists(self.combined_file_path):
-                await editMessage(self.message, "❌ <b>Error:</b> Failed to create combined file!")
-                return False
-            
-            file_size = await aio_getsize(self.combined_file_path)
-            await editMessage(self.message, f"✅ <b>Files combined successfully!</b>\n"
-                                         f"📁 <b>Filename:</b> {output_filename}\n"
-                                         f"📏 <b>Size:</b> {get_readable_file_size(file_size)}")
-            
-            # Upload to Google Drive
-            if upload_to_drive:
-                await self._upload_to_drive(output_filename, file_messages)
-            
-            return True
-            
-        except Exception as e:
-            LOGGER.error(f"Error combining files: {e}")
-            await sendMessage(self.message, f"❌ <b>Error:</b> {str(e)}")
-            return False
-        finally:
-            async with download_dict_lock:
-                if self.message.id in download_dict:
-                    del download_dict[self.message.id]
-            await update_all_messages()
-            await self._cleanup()
-    
-    async def _combine_files(self, file_paths, output_path):
-        """Combine multiple files into one"""
-        async with aiopen(output_path, 'wb') as outfile:
-            for file_path in file_paths:
-                async with aiopen(file_path, 'rb') as infile:
-                    while True:
-                        chunk = await infile.read(1024 * 1024)  # 1MB chunks
-                        if not chunk:
-                            break
-                        await outfile.write(chunk)
-    
-    async def _upload_to_drive(self, filename, file_messages):
-        """Upload combined file to Google Drive"""
-        try:
-            await editMessage(self.message, "☁️ <b>Uploading to Google Drive...</b>")
-            
-            user_tds = await fetch_user_tds(self.user_id)
-            drive_id = ""
-            index_link = ""
-            
-            if user_tds and len(user_tds) == 1:
-                drive_data = next(iter(user_tds.values()))
-                drive_id = drive_data.get('drive_id', '')
-                index_link = drive_data.get('index_link', '')
-            elif config_dict.get('GDRIVE_ID'):
-                drive_id = config_dict['GDRIVE_ID']
-                index_link = config_dict.get('INDEX_URL', '')
-            
-            if not drive_id:
-                await editMessage(self.message, "❌ <b>Error:</b> No Google Drive ID configured!")
-                return
-            
-            tag = f"@{self.message.from_user.username}" if self.message.from_user.username else self.message.from_user.mention
-            
-            class CombineUploadListener(MirrorLeechListener):
-                def __init__(self, message, tag, drive_id, index_link, up_path):
-                    super().__init__(message, tag=tag, drive_id=drive_id, index_link=index_link, upPath="gd", source_url=message.link)
-                    self.up_path = up_path
-                    self.name = filename
-                    
-                async def onUploadComplete(self, link, size, files, folders, mime_type, name, rclonePath, private):
-                    msg = BotTheme('NAME', Name=escape(name))
-                    msg += BotTheme('SIZE', Size=get_readable_file_size(size))
-                    msg += BotTheme('M_TYPE', Mimetype=mime_type)
-                    msg += BotTheme('ELAPSE', Time=get_readable_time(time() - self.message.date.timestamp()))
-                    
-                    buttons = ButtonMaker()
-                    buttons.ubutton(BotTheme('CLOUD_LINK'), link)
-                    if self.index_link:
-                        url_path = rquote(name)
-                        index_url = f"{self.index_link.rstrip('/')}/{url_path}"
-                        if mime_type == "Folder":
-                            index_url += "/"
-                            buttons.ubutton(BotTheme('INDEX_LINK_F'), index_url)
-                        else:
-                            buttons.ubutton(BotTheme('INDEX_LINK_D'), index_url)
-                    msg += BotTheme('M_CC', Tag=self.tag)
-                    await editMessage(self.message, msg, buttons.build_menu(2), 'IMAGES')
-                    
-                async def onUploadError(self, error):
-                    await editMessage(self.message, f"❌ <b>Upload Error:</b> {error}")
-            
-            upload_listener = CombineUploadListener(self.message, tag, drive_id, index_link, self.combined_file_path)
-
-            size = await aio_getsize(self.combined_file_path)
-            
-            # Start the GDrive upload and show live status
-            gd_helper = GoogleDriveHelper(upload_listener)
-            
-            async with download_dict_lock:
-                download_dict[upload_listener.uid] = GdriveStatus(gd_helper, size, self.message, upload_listener.uid, 'up', upload_listener.upload_details)
-            async with queue_dict_lock:
-                non_queued_up.add(upload_listener.uid)
-            
-            await update_all_messages()
-            await sync_to_async(gd_helper.upload, filename, self.combined_file_path, drive_id)
-
-        except Exception as e:
-            LOGGER.error(f"Error uploading to drive: {e}")
-            await editMessage(self.message, f"❌ <b>Upload Error:</b> {str(e)}")
-    
-    def _natural_sort_key(self, text):
-        """Natural sorting key for filenames with numbers"""
-        return [int(x) if x.isdigit() else x.lower() for x in re_split('([0-9]+)', str(text))]
-    
-    async def _cleanup(self):
-        """Clean up temporary files"""
-        try:
-            if await aiopath.exists(self.temp_dir):
-                await sync_to_async(rmtree, self.temp_dir)
-        except Exception as e:
-            LOGGER.error(f"Error during cleanup: {e}")
-
-
-# ====== FIXED COMBINE COMMAND (NO GET_CHAT_HISTORY) ======
-@new_task
-async def combine_command(client, message):
-    """Command handler for combining split files"""
-    try:
-        # Parse command arguments
-        args = message.text.split()[1:] if len(message.text.split()) > 1 else []
-        custom_filename = " ".join(args) if args else None
-        
-        if not message.reply_to_message:
-            help_msg = (
-                "📋 <b>How to use Split File Combiner:</b>\n\n"
-                "1️⃣ Forward all split files to this chat\n"
-                "2️⃣ Reply to the FIRST split file with <code>/combine [optional_filename]</code>\n"
-                "3️⃣ I'll ask you to forward the remaining files\n"
-                "4️⃣ Send them one by one when prompted\n\n"
-                "💡 <b>Tips:</b>\n"
-                "• Make sure files are in correct order (.001, .002, etc.)\n"
-                "• Use a descriptive filename to avoid confusion\n"
-                "• Files will be automatically uploaded to Google Drive\n\n"
-                "📝 <b>Example:</b> Reply to first split file with:\n"
-                "<code>/combine my_video.mp4</code>"
-            )
-            await sendMessage(message, help_msg)
-            return
-        
-        # Check if replied message has a document
-        if not message.reply_to_message.document:
-            await sendMessage(message, "❌ Please reply to a file (document) to start combining!")
-            return
-        
-        # Ask user how many files they want to combine
-        ask_msg = await sendMessage(
-            message,
-            "🔢 <b>How many split files do you want to combine?</b>\n\n"
-            "Reply with just the number (e.g., 2, 3, 4, etc.)\n"
-            "This includes the file you replied to."
-        )
-        
-        # Store the initial file and setup
-        user_data[message.from_user.id] = user_data.get(message.from_user.id, {})
-        user_data[message.from_user.id]['combine_session'] = {
-            'files': [message.reply_to_message],
-            'filename': custom_filename,
-            'total_files': 0,
-            'waiting_for_count': True,
-            'waiting_for_files': False,
-            'ask_msg_id': ask_msg.id
-        }
-        
-    except Exception as e:
-        LOGGER.error(f"Error in combine command: {e}")
-        await sendMessage(message, f"❌ <b>Error:</b> {str(e)}")
-
-
-# ====== HANDLE COMBINE SESSION ======
-@new_task
-async def handle_combine_session(client, message):
-    """Handle combine session responses"""
-    try:
-        user_id = message.from_user.id
-        if user_id not in user_data or 'combine_session' not in user_data[user_id]:
-            return  # No active session
-        
-        session = user_data[user_id]['combine_session']
-        
-        # Waiting for file count
-        if session.get('waiting_for_count', False):
-            try:
-                file_count = int(message.text.strip())
-                if file_count < 2:
-                    await sendMessage(message, "❌ You need at least 2 files to combine!")
-                    return
-                
-                session['total_files'] = file_count
-                session['waiting_for_count'] = False
-                session['waiting_for_files'] = True
-                
-                remaining = file_count - 1  # -1 because we already have the first file
-                
-                if remaining > 0:
-                    await sendMessage(
-                        message,
-                        f"📁 <b>Great! Now send the remaining {remaining} files one by one.</b>\n\n"
-                        f"Files received: 1/{file_count}\n"
-                        f"Send the next split file now..."
-                    )
-                else:
-                    # Only 1 file total, start combining
-                    await start_combining(client, message, session)
-                    
-            except ValueError:
-                await sendMessage(message, "❌ Please send a valid number (e.g., 2, 3, 4)")
-                return
-        
-        # Waiting for additional files
-        elif session.get('waiting_for_files', False):
-            if not message.document:
-                await sendMessage(message, "❌ Please send a file (document), not text!")
-                return
-            
-            session['files'].append(message)
-            current_count = len(session['files'])
-            total_count = session['total_files']
-            
-            if current_count < total_count:
-                remaining = total_count - current_count
-                await sendMessage(
-                    message,
-                    f"📁 <b>File received!</b>\n\n"
-                    f"Files received: {current_count}/{total_count}\n"
-                    f"Send the next split file... ({remaining} more needed)"
-                )
-            else:
-                # All files received, start combining
-                await sendMessage(message, "✅ <b>All files received! Starting combination...</b>")
-                await start_combining(client, message, session)
-                
-    except Exception as e:
-        LOGGER.error(f"Error handling combine session: {e}")
-        await sendMessage(message, f"❌ <b>Error:</b> {str(e)}")
-
-
-async def start_combining(client, message, session):
-    """Start the file combination process"""
-    try:
-        file_messages = session['files']
-        custom_filename = session['filename']
-        
-        # Clean up session data
-        user_id = message.from_user.id
-        if user_id in user_data and 'combine_session' in user_data[user_id]:
-            del user_data[user_id]['combine_session']
-        
-        # Start combining
-        combiner = SplitFileCombiner(client, message)
-        await combiner.combine_split_files(
-            file_messages,
-            custom_filename,
-            upload_to_drive=True
-        )
-        
-    except Exception as e:
-        LOGGER.error(f"Error starting combination: {e}")
-        await sendMessage(message, f"❌ <b>Error:</b> {str(e)}")
-
-
-# ====== FILTER FOR COMBINE SESSIONS ======
-def is_combine_session(_, __, message):
-    """Filter to check if user has active combine session"""
-    user_id = message.from_user.id
-    if user_id in user_data and 'combine_session' in user_data[user_id]:
-        session = user_data[user_id]['combine_session']
-        return session.get('waiting_for_count', False) or session.get('waiting_for_files', False)
-    return False
-
-from pyrogram.filters import create
-combine_session_filter = create(is_combine_session)
-
-
-# ====== YOUR EXISTING _mirror_leech FUNCTION ======
 @new_task
 async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=None, bulk=[]):
     text = message.text.split('\n')
@@ -777,20 +369,13 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
     await delete_links(message)
 
 
-# ====== MODIFIED CALLBACK HANDLER TO INCLUDE COMBINE FUNCTIONALITY ======
 @new_task
 async def kpsmlxcb(_, query):
     message = query.message
     user_id = query.from_user.id
     data = query.data.split()
-    
     if user_id != int(data[1]):
         return await query.answer(text="Not Yours!", show_alert=True)
-    
-    # ====== ADD THIS: Handle combine-related callbacks ======
-    if query.data.startswith('select_file_') or query.data in ['start_combine', 'cancel_combine']:
-        return await combine_callback(_, query)
-    
     elif data[2] == "logdisplay":
         await query.answer()
         async with aiopen('log.txt', 'r') as f:
@@ -896,7 +481,6 @@ async def qb_leech(client, message):
     _mirror_leech(client, message, isQbit=True, isLeech=True)
 
 
-# ====== ADD NEW HANDLERS FOR COMBINE COMMAND AND CALLBACKS ======
 bot.add_handler(MessageHandler(mirror, filters=command(
     BotCommands.MirrorCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 bot.add_handler(MessageHandler(qb_mirror, filters=command(
@@ -905,27 +489,4 @@ bot.add_handler(MessageHandler(leech, filters=command(
     BotCommands.LeechCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
 bot.add_handler(MessageHandler(qb_leech, filters=command(
     BotCommands.QbLeechCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted))
-
-def is_combine_session(_, __, message):
-    """Filter to check if user has active combine session"""
-    user_id = message.from_user.id
-    if user_id in user_data and 'combine_session' in user_data[user_id]:
-        session = user_data[user_id]['combine_session']
-        return session.get('waiting_for_count', False) or session.get('waiting_for_files', False)
-    return False
-
-from pyrogram.filters import create
-combine_session_filter = create(is_combine_session)
-
-# ====== ADD THIS NEW HANDLER FOR COMBINE COMMAND ======
-bot.add_handler(MessageHandler(
-    combine_command, 
-    filters=command(BotCommands.CombineCommand) & CustomFilters.authorized & ~CustomFilters.blacklisted
-))
-
-bot.add_handler(MessageHandler(
-    handle_combine_session, 
-    filters=combine_session_filter & CustomFilters.authorized & ~CustomFilters.blacklisted
-))
-
-bot.add_handler(CallbackQueryHandler(kpsmlxcb, filters=regex(r'^kpsmlx')))
+bot.add_handler(CallbackQueryHandler(kpsmlxcb, filters=regex(r'^kpsml')))
