@@ -249,7 +249,7 @@ Some links need user access so sure you must add USER_SESSION_STRING for it.
 1. Commands that start with <b>qb</b> are ONLY for torrents.
 """]
 
-//====== NEW COMBINE HELP MESSAGE ======
+#====== NEW COMBINE HELP MESSAGE ======
 
 COMBINE_HELP_MESSAGE = ["Split File Combiner", f""" <b>🔗 Split File Combiner Help</b>
 
