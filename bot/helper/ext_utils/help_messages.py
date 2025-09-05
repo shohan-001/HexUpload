@@ -249,6 +249,50 @@ Some links need user access so sure you must add USER_SESSION_STRING for it.
 1. Commands that start with <b>qb</b> are ONLY for torrents.
 """]
 
+//====== NEW COMBINE HELP MESSAGE ======
+
+COMBINE_HELP_MESSAGE = ["Split File Combiner", f""" <b>🔗 Split File Combiner Help</b>
+
+<b>Usage:</b> <code>/{BotCommands.CombineCommand[0]} [filename]</code> or <code>/{BotCommands.CombineCommand[1]} [filename]</code>
+
+<b>📋 Description:</b>
+Combine multiple split files (like .001, .002, .part1, .part2, etc.) into a single file and upload to Google Drive.
+
+<b>🔧 How to Use:</b>
+<b>1.</b> Send/forward all your split files to the bot
+<b>2.</b> Reply to any of the split files with the combine command
+<b>3.</b> Select all the parts you want to combine
+<b>4.</b> The bot will download, combine, and upload to Google Drive
+
+<b>💡 Examples:</b>
+<code>/{BotCommands.CombineCommand[0]}</code> - Auto-detect filename
+<code>/{BotCommands.CombineCommand[0]} movie.mkv</code> - Custom filename
+<code>/{BotCommands.CombineCommand[1]} archive.zip</code> - Using short command
+
+<b>📝 Supported Split Types:</b>
+• <code>.001, .002, .003...</code> (WinRAR/7zip splits)
+• <code>.part1, .part2, .part3...</code> (Generic parts)  
+• <code>.z01, .z02, .z03...</code> (7z splits)
+• Custom numbered splits
+
+<b>✨ Features:</b>
+• ✅ Interactive file selection
+• ✅ Automatic file ordering
+• ✅ Progress tracking
+• ✅ Google Drive upload
+• ✅ File size validation
+• ✅ Automatic cleanup
+• ✅ Password-protected files supported
+
+<b>⚠️ Requirements:</b>
+• Google Drive must be configured
+• Files must be accessible by the bot
+• Sufficient storage space
+• Files should be in correct order
+
+<b>🚨 Note:</b> Make sure all split parts are present before combining. Missing parts will result in corrupted files. Password-protected archives will maintain their protection after combining.
+"""]
+
 RSS_HELP_MESSAGE = """
 ➲ <b>Format to adding feed url(s):</b>
 Title1 link (required)
