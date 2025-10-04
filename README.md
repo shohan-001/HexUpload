@@ -21,8 +21,9 @@
 </div>
 
 ---
+<details>
+  <summary><h1>## ***Heroku CLI Guide***</h1></summary>
 
-## ***Heroku CLI Guide***
 
 **Step 1 :** Git clone this Repo and change directory
 > Make sure git is Installed in your system or quick run `apt-get install git pip curl -y`
@@ -133,7 +134,7 @@ heroku logs -a APP_NAME
 - Add arg `-t` for Live Stream Logs and Use `CTRL + C` to Exit from it.
 
 **All Heroku CLI Commands :** [Click Here](https://devcenter.heroku.com/articles/heroku-cli-commands#heroku-config-set)
-
+</details>
 ---
 
 ## ***Variables Description:***
