@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚀 𝐊𝐏𝐒𝐌𝐋-𝐗 𝐃𝐞𝐩𝐥𝐨𝐲𝐦𝐞𝐧𝐭 𝐆𝐮𝐢𝐝𝐞
+# 🚀 HexUploads 𝐃𝐞𝐩𝐥𝐨𝐲𝐦𝐞𝐧𝐭 𝐆𝐮𝐢𝐝𝐞
 
 <p>
     <a href="https://github.com/shohan-001/HexUpload">
