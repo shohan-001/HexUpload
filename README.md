@@ -1,162 +1,51 @@
-<div align=center>
+<div align=center>🚀 KPSML-X Bot: The Ultimate Deployable Mirror Leech Bot 🚀<p><a href="https://github.com/Tamilupdates/KPSML-X"><kbd><img src="https://graph.org/file/879239eb830dd6c00b07e.jpg" width="550" alt="KPSML-X Logo"></kbd></a></p>This repository contains the KPSML-X Bot, a feature-rich Telegram bot designed for efficient mirroring, leeching, and file management, deployable on multiple platforms, including Heroku and any Virtual Private Server (VPS) via Docker.🛠️ Deployment Options1. VPS Deployment (Recommended for Stability & Performance)Deploying via Docker on your own VPS ensures the most stable performance, persistent storage, and full control over resources.2. Heroku DeploymentThe traditional quick-start method for easy, fast deployment.3. Google Colab (Temporary Testing)A convenient way to test the bot without a persistent server.<img src="https://graph.org/file/504ba776ef0724a4ae85b.png" width="25" alt="Google Colab Logo"> Google Colab : Deploy Link</div><details><summary><h2>1. 🐳 VPS Deployment Guide (Using Docker)</h2></summary>This guide provides the robust, Docker-based method for self-hosting on any Linux VPS (Ubuntu/Debian recommended).PrerequisitesA running VPS with root access.Git and Docker Engine installed on the VPS.Step-by-Step InstructionsPhase 1: Setup and ConfigurationSSH into your VPS and Clone the Repository:# Install Git and Docker dependencies (if not already installed)
+sudo apt update && sudo apt install git curl -y
 
-## 𝐊𝐏𝐒𝐌𝐋-𝐗 𝐨𝐧 𝐇𝐞𝐫𝐨𝐤𝐮 𝐃𝐞𝐩𝐥𝐨𝐲 𝐮𝐬𝐢𝐧𝐠 𝐆𝐨𝐨𝐠𝐥𝐞 𝐂𝐨𝐥𝐚𝐛
+# Clone the bot repository
+git clone [https://github.com/Tamilupdates/KPSML-X](https://github.com/Tamilupdates/KPSML-X)
+cd KPSML-X
 
-<p>
-    <a href="https://github.com/Tamilupdates/KPSML-X">
-        <kbd>
-            <img src="https://graph.org/file/879239eb830dd6c00b07e.jpg" width="550" alt="KPSML-X Logo">
-        </kbd>
-    </a>
-</p>
+Create and Configure config.env:The file config.env holds all your bot's essential variables. Ensure there are NO spaces around the = sign (i.e., use KEY=VALUE, not KEY = VALUE).# Copy sample file to create config.env
+cp config_sample.env config.env
 
-### <img src="https://graph.org/file/504ba776ef0724a4ae85b.png" width="25" alt="Google Colab Logo"> 𝐆𝐨𝐨𝐠𝐥𝐞 𝐂𝐨𝐥𝐚𝐛 : [𝐃𝐞𝐩𝐥𝐨𝐲 𝐋𝐢𝐧𝐤](https://colab.research.google.com/drive/1ntoqoj3jDq2FtU2-joizh0DO64uoec9q)
+# Open the file for editing
+nano config.env 
 
----
+Critical variables to set:BOT_TOKEN="<Your Bot Token>"OWNER_ID="<Your Telegram User ID>"TELEGRAM_API="<Your API ID>"TELEGRAM_HASH="<Your API Hash>"DATABASE_URL="<Your MongoDB URL>"TORRENT_TIMEOUT="0" (Required to prevent crashes)BASE_URL (Set to your VPS's public IP or domain for web features like file selection):# Example if using default port 80:
+BASE_URL="[http://123.45.67.89/](http://123.45.67.89/)"
 
-## 𝐃𝐞𝐩𝐥𝐨𝐲 𝐨𝐧 𝐇𝐞𝐫𝐨𝐤𝐮
+CRITICAL FIX: REMOVE THE SAMPLE LINEIf the file contains _____REMOVE_THIS_LINE_____=True, this must be deleted or commented out (e.g., # _____REMOVE_THIS_LINE_____=True) to prevent the bot from exiting.Phase 2: Docker Build and RunBuild the Docker Image:This process compiles the entire environment, including necessary system dependencies like ffmpeg.docker build -t kpsmlx-bot .
 
-[![Deploy on Heroku](https://www.herokucdn.com/deploy/button.svg)](https://dashboard.heroku.com/new?template=https://github.com/shohan-001/HexUpload)
+Run the Container and Expose the Web Port (Mandatory for File Selection):We must publish the container's internal web port (which is assumed to be 80) to the host's public port (80) to enable features like torrent file selection (/qms command).# IMPORTANT: The '-e CONFIG_FILE_URL=""' prevents the bot from overwriting 
+# your local config.env with old cloud configurations.
+docker run -d \
+  --name kpsmlx_bot \
+  --restart=always \
+  --env-file config.env \
+  -e CONFIG_FILE_URL="" \
+  -p 80:80 \
+  kpsmlx-bot
 
-</div>
+Verify Deployment and Troubleshoot:Check the logs immediately after running to ensure no errors occurred.docker logs -f kpsmlx_bot
 
----
-<details>
-  <summary><h1>Heroku CLI Guide</h1></summary>
+If you see the ffmpeg not installed error, repeat the build/run process.If file selection still shows a Heroku URL, ensure you added -e CONFIG_FILE_URL="" and corrected the BASE_URL in config.env.</details><details><summary><h2>2. ☁️ Heroku CLI Deployment Guide</h2></summary>The original guide is included here for Heroku CLI deployment.Step 1 : Git clone this Repo and change directoryMake sure git is Installed in your system or quick run apt-get install git pip curl -ygit clone [https://github.com/Tamilupdates/KPSML-X](https://github.com/Tamilupdates/KPSML-X) && cd KPSML-X 
 
+Step 2 : Install Heroku CLIcurl [https://cli-assets.heroku.com/install.sh](https://cli-assets.heroku.com/install.sh) | sh
+# OR use apt-get/npm as described in the official Heroku docs.
 
-**Step 1 :** Git clone this Repo and change directory
-> Make sure git is Installed in your system or quick run `apt-get install git pip curl -y`
+Step 3 : Login into Herokuheroku login
+# OR
+heroku login -i 
 
-```shell
-git clone https://github.com/Tamilupdates/KPSML-X && cd KPSML-X 
-```
+Step 4 : Create Heroku App and specify stackheroku create --region us --stack container APP_NAME
 
-**Step 2 :** Now Install Heroku in your Sytem or checkout Official Heroku Deploy Docs, or Download via `apt-get` or `npm`
-> For Android : Use `termux` (Download via FDroid) for CLI usage
+To Be Noted: Copy the BASE_URL displayed after creation for use in config.env.Step 5 : Configure config.env Locallynano config.env
+# ... Edit the mandatory variables including the BASE_URL copied from above ...
 
-**The script requires sudo and isn’t Windows compatible.**
-```shell
-curl https://cli-assets.heroku.com/install.sh | sh
-```
-
-**Install with Ubuntu / Debian apt-get**
-```shell
-curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
-```
-
-**Install via `npm` (Not Recommanded)**
-```shell
-npm install -g heroku
-```
-
-**Official Heroku Install Guide :** [Check Here](https://devcenter.heroku.com/articles/heroku-cli#install-the-heroku-cli)
-
-**Step 3 :** Login into Heroku and Log In CLI via Browser 
-
-_With Browser_
-```shell
-heroku login
-```
-
-**OR**
-
-_Without Browser_
-```shell
-heroku login -i
-```
-
-- Put `Heroku Email` : Heroku Email `email@example.com`
-- Put `Heroku Password` : Heroku API Key. Get from [Here](https://dashboard.heroku.com/account)
-
-**Step 4 :** Create Heroku App and specify stack and region with App Name
-
-```shell
-heroku create --region us --stack container APP_NAME
-```
-
-**To Be Noted**: Copy the `BASE_URL` after the App is Created and Put the Value in `BASE_URL` when editing `config.env`
-
-**Notes:**
-- `--region us` for United States Server.
-- `--region eu` for Europe Server.
-- `APP_NAME` should be replaced with your unique app name _(Optional)_. If not given it generates a random name.
-- `--stack container` for setting stack to container for Dockerfile.
-- `--buildpack heroku/python` for using build slug for repo deploy and build.
-
-**Step 5 :** Now set all the Required Variables and Files into this Branch MAIN Repo like config.env, accounts.zip, token.pickle, All Private Files(optional)- 
-  > Only config.env Mabdatory with Only Mandatory Vars Only, After that Put all Private Files or Vars via Bot Settings `/bs`
-
-**To Edit Inside CLI (nano Editor):** _(Termux Users)_
-```shell
-nano config.env
-```
-- **Sample config.env** _(Copy these and Paste in Editor and Fill Up)_
-  ```
-  BOT_TOKEN = ""
-  TELEGRAM_API = ""
-  TELEGRAM_HASH = ""
-  OWNER_ID = ""
-  DATABASE_URL = ""
-  BASE_URL = ""
-  SET_COMMANDS = "True"
-  UPSTREAM_REPO = "https://github.com/shohan-001/HexUpload"
-  UPSTREAM_BRANCH = "hk_kpsmlx"
-  ```
-- After Setup Exit from Editor via `CTRL + X`, followed via `y` and `Enter`...
-
-**Helpful Commands:**
-- **Exit from nano** : `CTRL + X`
-- **Save File** : `CTRL + S`
-- **Check Help** : `CTRL + G`
-- **Undo Changes** : `ALT + U`
-- ^ means CTRL _(Termux Users)_
-
-**Step 6 :** Set Local git remote for Heroku. Give All Commands One by One.
-
-```shell
-git add . -f
+Step 6 : Set Local git remote for Heroku.git add . -f
 git commit -m "HK Setup"
 heroku git:remote -a APP_NAME
-```
 
-**Step 7 :** Now push to Heroku via git forcefully to build.
+Step 7 : Now push to Heroku via git forcefully to build.git push heroku main -f
 
-```shell
-git push heroku main -f
-```
-
-**Heroku Logs:** When checking Logs, Use this will give Complete Logs.
-```shell
-heroku logs -a APP_NAME
-```
-
-- Add arg `-t` for Live Stream Logs and Use `CTRL + C` to Exit from it.
-
-**All Heroku CLI Commands :** [Click Here](https://devcenter.heroku.com/articles/heroku-cli-commands#heroku-config-set)
-</details>
----
-<details>
-  <summary><h1>Variables Description:</h1></summary>
-
-- `UPSTREAM_REPO`: GitHub repository URL, if your repo is private add `https://username:{githubtoken}@github.com/{username}/{reponame}`. `Str`
-- Any change in docker you need to deploy/build again with updated repo to take effect. 
-              - **No Need to delete .gitignore file or any File**
-- `UPSTREAM_BRANCH`: Upstream branch for update. Default is `hk_kpsmlx`. `Str`
-- `BOT_TOKEN`: Telegram Bot Token that you got from [BotFather](https://t.me/BotFather). `Str`
-- `OWNER_ID`: Telegram User ID (not username) of the Owner of the bot. `Int`
-- `TELEGRAM_API`: This is to authenticate your Telegram account for downloading Telegram files. You can get this from <https://my.telegram.org>. `Int`
-- `TELEGRAM_HASH`: This is to authenticate your Telegram account for downloading Telegram files. You can get this from <https://my.telegram.org>. `Str`
-- `BASE_URL`: Valid BASE URL where the bot is deployed to use torrent web files selection. Format of URL should be `https://app-name-random_code.herokuapp.com/`, where `app-name` is the name of your heroku app Paste the URL got when the App was Made. `Str`
-- `TORRENT_TIMEOUT`: Timeout of dead torrents downloading with qBittorrent and Aria2c in seconds. `Int`
-  > Must Add else Bot Crashes! Set to 0 even not Needed
-- `DATABASE_URL`: Database URL of MongoDb to store all your files and Vars. Adding this will be Helpful. `Str`
-</details>
-
----
-
-## ***Branch Specifications:***
-
-- All files to be Uploaded in `main` Branch and set Upstream as `hk_kpsmlx` Branch
-
----
+</details><details><summary><h2>3. ⚙️ Variables Configuration Reference</h2></summary>Mandatory VariablesVariableDescriptionTypeNotesBOT_TOKENTelegram Bot Token from BotFather.StrRequired for bot operation.OWNER_IDTelegram User ID of the Owner (integer).IntUse /id bot command to get your ID.TELEGRAM_APIAPI ID from .IntUsed for account authentication.TELEGRAM_HASHAPI Hash from .StrUsed for account authentication.DATABASE_URLMongoDB Database URL.StrHighly Recommended for persistent settings and data.TORRENT_TIMEOUTTimeout for dead torrents in seconds.IntMUST BE SET (e.g., to "0") to prevent bot crashes.BASE_URLPublic URL where the bot's web features (torrent select) are accessible.StrMUST be http(s)://your-ip-or-domain/ (VPS) or https://app-name.herokuapp.com/ (Heroku).Update VariablesVariableDescriptionTypeUPSTREAM_REPOGitHub repository URL for self-update checks.StrUPSTREAM_BRANCHUpstream branch for updates. Default is hk_kpsmlx.Str</details>
