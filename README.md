@@ -3,9 +3,9 @@
 # 🚀 𝐊𝐏𝐒𝐌𝐋-𝐗 𝐃𝐞𝐩𝐥𝐨𝐲𝐦𝐞𝐧𝐭 𝐆𝐮𝐢𝐝𝐞
 
 <p>
-    <a href="https://github.com/Tamilupdates/KPSML-X">
+    <a href="https://github.com/shohan-001/HexUpload">
         <kbd>
-            <img src="https://graph.org/file/879239eb830dd6c00b07e.jpg" width="550" alt="KPSML-X Logo">
+            <img src="https://files.catbox.moe/2jpph5.png" width="550" alt="KPSML-X Logo">
         </kbd>
     </a>
 </p>
