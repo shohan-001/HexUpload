@@ -22,7 +22,7 @@
 
 ---
 <details>
-  <summary><h1> ## ***Heroku CLI Guide*** </h1></summary>
+  <summary><h1>Heroku CLI Guide</h1></summary>
 
 
 **Step 1 :** Git clone this Repo and change directory
@@ -136,8 +136,8 @@ heroku logs -a APP_NAME
 **All Heroku CLI Commands :** [Click Here](https://devcenter.heroku.com/articles/heroku-cli-commands#heroku-config-set)
 </details>
 ---
-
-## ***Variables Description:***
+<details>
+  <summary><h1>Variables Description:</h1></summary>
 
 - `UPSTREAM_REPO`: GitHub repository URL, if your repo is private add `https://username:{githubtoken}@github.com/{username}/{reponame}`. `Str`
 - Any change in docker you need to deploy/build again with updated repo to take effect. 
@@ -151,6 +151,7 @@ heroku logs -a APP_NAME
 - `TORRENT_TIMEOUT`: Timeout of dead torrents downloading with qBittorrent and Aria2c in seconds. `Int`
   > Must Add else Bot Crashes! Set to 0 even not Needed
 - `DATABASE_URL`: Database URL of MongoDb to store all your files and Vars. Adding this will be Helpful. `Str`
+</details>
 
 ---
 
