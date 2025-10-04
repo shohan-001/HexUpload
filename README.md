@@ -22,7 +22,7 @@
 
 ---
 <details>
-  <summary><h1>## ***Heroku CLI Guide***</h1></summary>
+  <summary><h1> ## ***Heroku CLI Guide*** </h1></summary>
 
 
 **Step 1 :** Git clone this Repo and change directory
