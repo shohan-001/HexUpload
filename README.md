@@ -462,12 +462,12 @@ docker build --no-cache -t kpsmlx-bot .
 
 [📢 Updates Channel](https://t.me/Tamilupdates) • [💬 Support Group](https://t.me/TamilupdatesGroup)
 
-**Found a bug?** [Report it here](https://github.com/Tamilupdates/KPSML-X/issues)
+**Found a bug?** [Report it here](]https://github.com/shohan-001/HexUpload/issues)
 
 ---
 
 ### ⭐ Star this repo if you found it helpful!
 
-**Made with ❤️ by the KPSML-X Team**
+**Made with ❤️ by the HexUploads Team**
 
 </div>
