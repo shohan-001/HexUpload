@@ -130,7 +130,7 @@ TORRENT_TIMEOUT = "0"
 DATABASE_URL = "mongodb+srv://username:password@cluster.mongodb.net/dbname"
 
 # ====== OPTIONAL BUT RECOMMENDED ======
-UPSTREAM_REPO = "https://github.com/Tamilupdates/KPSML-X"
+UPSTREAM_REPO = "https://github.com/shohan-001/HexUpload"
 UPSTREAM_BRANCH = "hk_kpsmlx"
 SET_COMMANDS = "True"
 ```
